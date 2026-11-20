@@ -1,0 +1,117 @@
+"""Read-only adaptation of the Student Development Guide Section 6.2 scaffold."""
+
+import random
+import re
+import time
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
+
+import requests
+
+ENDPOINTS = {"portfolio.php", "policies.php", "market_prices.php"}
+
+
+class ApiError(RuntimeError):
+    def __init__(self, status, message, code=None):
+        self.status, self.code = status, code
+        label = f" ({code})" if code else ""
+        super().__init__(f"Ledger HTTP {status}{label}: {message}")
+
+
+class Cooldown(RuntimeError):
+    def __init__(self, seconds, status=None):
+        super().__init__("Wait before the next Ledger request")
+        self.seconds, self.status = seconds, status
+
+
+def validate_base(base):
+    try:
+        url = urlsplit(base)
+        valid = (url.scheme == "https" and url.hostname
+                 and url.username is None and url.password is None
+                 and "?" not in base and "#" not in base
+                 and not any(c.isspace() or ord(c) < 32 for c in base)
+                 and "\\" not in base)
+        url.port  # Reject malformed ports before any request.
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError("Use the course's canonical HTTPS API base URL")
+    return base.rstrip("/")
+
+
+def retry_seconds(value):
+    try:
+        if value.isdigit():
+            return max(1, int(value))
+        return max(1, parsedate_to_datetime(value).timestamp() - time.time())
+    except (ValueError, TypeError, OverflowError):
+        return 15
+
+
+class LedgerClient:
+    def __init__(self, base, key):
+        self.base = validate_base(base)
+        if (not key.strip() or key.strip().startswith("PASTE_")
+                or any(ord(c) < 33 or ord(c) > 126 for c in key)):
+            raise ValueError("Configure the complete trader-scoped API key")
+        self.key = key
+        self.session = requests.Session()
+        # Avoid implicit .netrc credentials and environment proxy configuration.
+        self.session.trust_env = False
+        self.next_allowed = self.next_request_at = 0.0
+
+    def close(self):
+        self.session.close()
+
+    def request(self, method, endpoint, *, params=None):
+        if method != "GET" or endpoint not in ENDPOINTS:
+            raise ValueError("This milestone permits only the three smoke-test GET endpoints")
+        for attempt in range(3):
+            delay = self.next_allowed - time.monotonic()
+            if delay > 0:
+                raise Cooldown(delay)
+            spacing = self.next_request_at - time.monotonic()
+            if spacing > 0:
+                time.sleep(spacing)
+            self.next_request_at = time.monotonic() + 1.1
+            try:
+                response = self.session.request(
+                    method, f"{self.base}/{endpoint}",
+                    headers={"X-Api-Key": self.key}, params=params,
+                    timeout=(5, 15), allow_redirects=False,
+                )
+            except requests.RequestException:
+                if attempt == 2:
+                    raise ApiError(0, "Read failed; check connectivity and try later") from None
+                time.sleep(2 ** attempt + random.uniform(0, 1))
+                continue
+            status = response.status_code
+            if status in {429, 503}:
+                seconds = retry_seconds(response.headers.get("Retry-After", "15"))
+                self.next_allowed = time.monotonic() + seconds + random.uniform(0, 2)
+                raise Cooldown(self.next_allowed - time.monotonic(), status)
+            if 300 <= status < 400:
+                raise ApiError(status, "Redirect refused; check API base URL")
+            try:
+                result = response.json()
+            except ValueError:
+                raise ApiError(status, "Expected JSON; check API base URL or hosting layer") from None
+            if not isinstance(result, dict):
+                raise ApiError(status, "Expected a JSON object")
+            if not response.ok or "error" in result:
+                # Never include server messages/bodies; even error codes are untrusted.
+                code = result.get("error")
+                if (not isinstance(code, str) or not re.fullmatch(r"[a-z_]{1,64}", code)
+                        or self.key in code):
+                    code = "unavailable"
+                message = "API read failed"
+                if status == 401:
+                    message = "Use the full original key; replace it if revoked or lost"
+                elif status == 403:
+                    message = "Use a trader-scoped key; do not substitute a full key"
+                raise ApiError(status, message, code)
+            return result
+
+    def get(self, endpoint, **params):
+        return self.request("GET", endpoint, params=params)

@@ -1,1 +1,11 @@
 /docs
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+config.json
+config.*.json
+!config.example.json
+.env
+.env.*
