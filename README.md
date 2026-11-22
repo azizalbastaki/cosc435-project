@@ -1,5 +1,43 @@
 # COSC 435 AI Security Engineering
 
+## Submitted theory check
+
+Read your existing submitted theory with the trader key and check its policy
+eligibility. Each teammate uses their own config and assigned currency:
+
+```sh
+source .venv/bin/activate
+python theory_check.py --config config.json --symbol ETH
+python -m unittest discover -s tests -v
+```
+
+`theory.py` validates the response from `theory.php`: SUBMITTED status, positive
+integer ID/version, lookback of 1–1440 minutes, supported strategy and currencies,
+required nonempty text without NUL, UTF-8 byte limits, and numeric ranges with at
+most four decimal places. Booleans, strings used as numbers, NaN, and infinity
+are rejected. Values are stored in an immutable Theory object with Decimal
+settings; prose is retained as untrusted data and excluded from its repr.
+
+The API validator accepts one to six distinct currencies. The member-specific
+`read_theory` check additionally requires exactly the assigned currency, as the
+course requires, and checks `policies.php` for permission. It does not alter
+your theory or policy. Other server metadata is ignored; created_at is not used
+for decision-making. The summary prints only validated identity/settings.
+
+Exit 0 means this check passed; exit 1 prints a local HOLD for invalid/missing
+theory, policy, configuration, or API failure; exit 2 is a cooldown. No HOLD or
+trade is sent to Ledger. Passing does not establish profitability or authorize
+trading. The offline demo still uses fixtures; wiring theory into a live trader,
+market replay/signals, and version snapshots for pending-order reviews remain
+later work. Never assume the latest theory matches an older pending order.
+
+The read-only client now permits `theory.php` for either role, as documented by
+Ledger; all POST requests remain disabled. No other endpoints were added.
+Reference: Student Development Guide Sections 5.1/6.3 and Appendix B.
+AI assistance (2026-11-23): Codex implemented theory parsing, the read-only command,
+and mocked boundary/field/eligibility tests. Existing smoke tests were updated
+to reflect the newly allowed theory GET.
+
 ## How to read the code
 
 Start with the agent flow, then follow the helpers as needed:
