@@ -1,5 +1,73 @@
 # COSC 435 AI Security Engineering
 
+## Milestone 2: offline local order validation
+
+`validation.py` now provides `validate_order`, a pure function for checking a
+trader candidate against supplied policy, portfolio, quote, selected currencies,
+and per-buy position fraction. It makes no HTTP requests and reads no keys.
+The smoke test below remains unchanged; no trading loop is connected yet.
+
+The candidate must contain exactly `symbol`, `action`, `quantity`, and `reasoning`.
+BUY/SELL checks cover currency eligibility, restricted actions, executed hourly
+and daily quotas, positive finite quantities, the transaction ceiling, available
+cash/per-buy cash fraction, and owned SELL quantity. Missing holdings mean zero.
+HOLD requires zero quantity and a nonempty explanation, then returns locally
+without requiring trading context. A bad candidate raises `ValidationError`;
+a later trader loop should handle that as a local HOLD, never submit it.
+
+Example, entirely offline (run in Python from the repository root):
+
+```python
+from validation import validate_order
+
+checked = validate_order(
+    {"symbol": "ETH", "action": "BUY", "quantity": 0.1,
+     "reasoning": "Illustrative candidate for testing only."},
+    policy={"allowed_symbols": ["ETH"], "restricted_actions": ["WITHDRAW"],
+            "max_transaction_amount": 1000, "max_trades_per_hour": 10,
+            "max_trades_per_day": 50, "trades_last_hour": 0, "trades_last_day": 0},
+    portfolio={"cash_balance": 10000, "holdings": []},
+    quote={"symbol": "ETH", "price": 3200},
+    selected_symbols=["ETH"], position_fraction=0.05,
+)
+print(checked.action, checked.quantity, checked.settled_amount)
+# BUY 0.1 320.00 — nothing is submitted.
+```
+
+Run just these tests, or the complete suite:
+
+```sh
+python -m unittest discover -s tests -p 'test_validation.py' -v
+python -m unittest discover -s tests -v
+git diff --check
+```
+
+Money helpers adapt Section 6.3 of the Student Development Guide: BUY settlement
+rounds up, SELL settlement rounds down, and policy checks compare the larger of
+the exact and settled amounts against the ceiling. `bounded_quantity` rounds
+budget down to cents and quantity down to ten decimals. The helpers add strict
+numeric checks, explicit BUY/SELL action checks, and a local 80-digit Decimal
+context so ambient precision cannot alter the calculation. Policy lists accept
+arrays or comma-separated text. Numeric strings and booleans are rejected;
+internal Decimal values are accepted alongside JSON integers/floats. For this
+milestone, supplied amounts/prices also conservatively use the quantity bounds
+(below 10^18, at most ten fractional places). No tolerance relaxes money limits.
+
+This is a building block, not complete theory validation or permission to trade.
+Before live proposals, the caller must validate an active submitted theory,
+supply its selected symbols and position fraction, attach its id/version, verify
+fresh market evidence and strategy compliance, and handle pending/uncertain
+orders. Quote freshness and those theory checks are not implemented here.
+The Guardian must independently fetch and check evidence later; the trader's
+successful validation is not Guardian approval. No new API endpoints were added.
+
+AI assistance (2026-11-22): Codex implemented and tested these offline checks
+using guide Sections 6.3–6.5. Include team review and this assistance in the final
+report disclosure. Review `validation.py`, `tests/test_validation.py`, and this
+section before committing this milestone.
+
+## Milestone 1: connection check
+
 Milestone 1: a one-shot, read-only Ledger smoke test. It reads the portfolio,
 security policy, and selected currency's market price with one trader client.
 It needs no active theory and sends no orders, reviews, or HOLD entries.
