@@ -4,7 +4,13 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as SchemaError
 
 from model_adapter import ModelError
-from validation import number, normalize_list, ValidationError
+from validation import number, normalize_list
+
+POLICY_FIELDS = (
+    "allowed_symbols", "restricted_actions", "max_transaction_amount",
+    "max_trades_per_hour", "max_trades_per_day", "trades_last_hour",
+    "trades_last_day", "escalation_threshold",
+)
 
 TRADER_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -45,18 +51,33 @@ def evidence(source, symbol):
     quote = source.quote(symbol)
     strategy = source.strategy()
     # Select fields explicitly instead of forwarding whole source responses.
+    safe_policy = {}
+    for name in POLICY_FIELDS:
+        safe_policy[name] = policy[name]
+
+    safe_holdings = []
+    for holding in portfolio["holdings"]:
+        safe_holdings.append({
+            "symbol": holding["symbol"],
+            "quantity": holding["quantity"],
+        })
+
     data = {
-        "policy": {k: policy[k] for k in (
-            "allowed_symbols", "restricted_actions", "max_transaction_amount",
-            "max_trades_per_hour", "max_trades_per_day", "trades_last_hour",
-            "trades_last_day", "escalation_threshold")},
-        "portfolio": {"cash_balance": portfolio["cash_balance"],
-                      "holdings": [{"symbol": h["symbol"], "quantity": h["quantity"]}
-                                   for h in portfolio["holdings"]]},
+        "policy": safe_policy,
+        "portfolio": {
+            "cash_balance": portfolio["cash_balance"],
+            "holdings": safe_holdings,
+        },
         "quote": {"symbol": quote["symbol"], "price": quote["price"]},
         "selected_symbols": strategy["selected_symbols"],
         "position_fraction": strategy["position_fraction"],
     }
+    validate_evidence(data, symbol)
+    return data
+
+
+def validate_evidence(data, symbol):
+    """Reject malformed source data before either agent uses it."""
     try:
         for field in ("max_transaction_amount", "escalation_threshold"):
             number(data["policy"][field])
@@ -79,6 +100,5 @@ def evidence(source, symbol):
         fraction = number(data["position_fraction"])
         if not 0 < fraction <= 1:
             raise ValueError
-    except (ValidationError, ValueError, TypeError):
+    except (ValueError, TypeError):
         raise ModelError("Malformed independent evidence") from None
-    return data

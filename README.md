@@ -1,5 +1,82 @@
 # COSC 435 AI Security Engineering
 
+## How to read the code
+
+Start with the agent flow, then follow the helpers as needed:
+
+| Read in this order | What to look for |
+| --- | --- |
+| `trader.py` → `decide()` | Read evidence → ask the model → validate → return a candidate or HOLD. |
+| `guardian.py` → `review_next()` | Read pending order → independent checks → model review → fresh checks. |
+| `validation.py` → `_validate()` | Five numbered stages; named helpers check permissions, quotas, cash, and holdings. |
+| `offline_demo.py` → `run_demo()` | Connects the two agents through an in-memory queue. |
+| `agent_contracts.py` | Expected model JSON fields and evidence selection/validation. |
+| `model_adapter.py` | The actual Muse HTTP call and response validation. |
+
+Live read-only tools are separate: `smoke_test.py` reads the trader's account;
+`guardian_check.py` uses `guardian_source.py` to inspect pending orders. Both use
+`client.py` for HTTP and `configuration.py` to read private settings.
+
+Two Python details used in the code:
+
+- `validate_order(order, **data)` passes the entries of the `data` dictionary as
+  named arguments (`policy=...`, `portfolio=...`, and so on).
+- `raise ValidationError(...)` stops a check. The caller's `except` block handles
+  it as HOLD, BLOCK, or ESCALATE according to the stage that failed.
+
+The functions return data; they do not automatically submit trades. The longer
+milestone notes below explain what each part can currently do.
+
+Readability pass (2026-11-22, with Codex assistance): expanded dense expressions,
+added numbered agent/validation stages, separated balance and evidence checks,
+and removed a redundant wrapper. Existing safety behavior is covered by tests.
+
+## Milestone 5: Guardian reads directly from Ledger
+
+`guardian_source.py` adds read-only pending-order evidence collection.
+`guardian_check.py` is the one-shot command. It uses a separate guardian config,
+GETs `trade_pending.php?limit=2`, and independently GETs policy, portfolio, and
+the relevant market price for each pending order. Embedded queue context, trader
+price estimates, and reasoning are not used as evidence or printed. `has_more`
+is reported but never followed automatically. An empty queue is successful.
+
+Create a separate ignored file (do not overwrite an existing one):
+
+```sh
+cp -n config.guardian.example.json config.guardian.json
+chmod 600 config.guardian.json
+```
+
+Edit **config.guardian.json**, replacing its placeholder with the complete
+guardian-scoped Ledger key. The example must remain placeholders only. Do not
+put the trader key in this file; either role loader rejects the other role's key.
+The client role restricts endpoints locally; Ledger checks the actual key scope.
+A full key may still pass server reads, so verify the scope in the dashboard.
+
+```sh
+python guardian_check.py --config config.guardian.json
+python -m unittest discover -s tests -v
+git check-ignore config.guardian.json
+```
+
+This prints a small validated summary, leaves every order pending, and submits
+no reviews. It does not call Muse. Exit codes: 0 success, 1 invalid configuration
+or API/response failure, 2 cooldown (wait the reported time before rerunning).
+An invalid pending row stops the batch; this observer does not decide its fate.
+Do not create orders merely to populate the queue for this check.
+
+Live review decisions are not connected yet: we still need theory/version
+provenance, full evidence validation, fresh rechecks, and recovery handling before
+enabling review submission. `guardian_source.py` is an observational collector,
+not a drop-in live replacement for the offline fixture strategy source.
+The existing trader client remains limited to its original three GET endpoints;
+only a guardian client can now GET pending orders. POST remains disabled for both.
+
+AI assistance (2026-11-22): Codex added the read-only Guardian collector, role
+config isolation, command, and mocked tests. AGENTS.md now reflects this expanded
+read-only milestone. Only the placeholder guardian example is exempted from Git
+ignore; real role configuration remains ignored.
+
 ## Milestone 4: offline Trader and Guardian flow
 
 The Guardian reads from Ledger, not from the trader. This milestone models that

@@ -50,11 +50,15 @@ def retry_seconds(value):
 
 
 class LedgerClient:
-    def __init__(self, base, key):
+    def __init__(self, base, key, *, role="trader"):
+        if role not in {"trader", "guardian"}:
+            raise ValueError("Choose trader or guardian role")
+        self.role = role
+        self.endpoints = ENDPOINTS | ({"trade_pending.php"} if role == "guardian" else set())
         self.base = validate_base(base)
         if (not key.strip() or key.strip().startswith("PASTE_")
                 or any(ord(c) < 33 or ord(c) > 126 for c in key)):
-            raise ValueError("Configure the complete trader-scoped API key")
+            raise ValueError(f"Configure the complete {role}-scoped API key")
         self.key = key
         self.session = requests.Session()
         # Avoid implicit .netrc credentials and environment proxy configuration.
@@ -65,8 +69,8 @@ class LedgerClient:
         self.session.close()
 
     def request(self, method, endpoint, *, params=None):
-        if method != "GET" or endpoint not in ENDPOINTS:
-            raise ValueError("This milestone permits only the three smoke-test GET endpoints")
+        if method != "GET" or endpoint not in self.endpoints:
+            raise ValueError("This role permits only its documented read-only endpoints")
         for attempt in range(3):
             delay = self.next_allowed - time.monotonic()
             if delay > 0:
@@ -109,7 +113,7 @@ class LedgerClient:
                 if status == 401:
                     message = "Use the full original key; replace it if revoked or lost"
                 elif status == 403:
-                    message = "Use a trader-scoped key; do not substitute a full key"
+                    message = f"Use a {self.role}-scoped key; do not substitute a full key"
                 raise ApiError(status, message, code)
             return result
 

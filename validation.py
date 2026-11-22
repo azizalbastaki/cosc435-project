@@ -89,9 +89,12 @@ def validate_order(order, *, policy, portfolio, quote, selected_symbols, positio
 
 
 def _validate(order, policy, portfolio, quote, selected_symbols, position_fraction):
+    # 1. Check the order's fields and explanation.
     if not isinstance(order, dict) or set(order) != {"symbol", "action", "quantity", "reasoning"}:
         raise ValidationError("Order must contain exactly symbol, action, quantity, reasoning")
-    symbol, action, reason = order["symbol"], order["action"], order["reasoning"]
+    symbol = order["symbol"]
+    action = order["action"]
+    reason = order["reasoning"]
     if not isinstance(symbol, str) or action not in ("BUY", "SELL", "HOLD"):
         raise ValidationError("Invalid symbol type or action")
     if not isinstance(reason, str) or not reason.strip() or "\x00" in reason:
@@ -100,26 +103,20 @@ def _validate(order, policy, portfolio, quote, selected_symbols, position_fracti
     if len(reason.encode("utf-8")) > 16000:
         raise ValidationError("Explanation exceeds 16000 UTF-8 bytes")
     quantity = number(order["quantity"])
+
+    # 2. HOLD stops here: it does not need prices, balances, or policy checks.
     if action == "HOLD":
         if quantity != 0:
             raise ValidationError("HOLD quantity must be zero")
         return ValidatedOrder(symbol, action, quantity, reason, Decimal(0), Decimal(0))
     if quantity <= 0:
         raise ValidationError("BUY/SELL quantity must be positive")
-    selected = normalize_list(selected_symbols)
-    if not selected or not selected <= SYMBOLS:
-        raise ValidationError("Invalid selected currencies")
-    if symbol not in SYMBOLS or symbol not in selected or symbol not in normalize_list(policy["allowed_symbols"]):
-        raise ValidationError("Currency must be supported and selected by both strategy and policy")
-    if action in normalize_list(policy["restricted_actions"]):
-        raise ValidationError("Action is restricted by policy")
-    for count_name, limit_name in (("trades_last_hour", "max_trades_per_hour"),
-                                   ("trades_last_day", "max_trades_per_day")):
-        count, limit = policy[count_name], policy[limit_name]
-        if type(count) is not int or type(limit) is not int or min(count, limit) < 0:
-            raise ValidationError("Trade counts and limits must be nonnegative integers")
-        if count >= limit:
-            raise ValidationError("Executed trade quota is exhausted")
+
+    # 3. Check currency/action permissions and executed trade counts.
+    check_permissions(symbol, action, policy, selected_symbols)
+    check_trade_quotas(policy)
+
+    # 4. Calculate the exact value and the amount Ledger would settle.
     if quote["symbol"] != symbol:
         raise ValidationError("Quote does not match the order currency")
     price = number(quote["price"])
@@ -132,23 +129,66 @@ def _validate(order, policy, portfolio, quote, selected_symbols, position_fracti
     cap = number(policy["max_transaction_amount"])
     if max(exact, settled) > cap:
         raise ValidationError("Order exceeds the policy transaction ceiling")
+
+    # 5. A BUY needs cash; a SELL needs owned currency.
     if action == "BUY":
-        cash = number(portfolio["cash_balance"])
-        fraction = number(position_fraction)
-        if not Decimal("0.001") <= fraction <= 1 or fraction.as_tuple().exponent < -4:
-            raise ValidationError("Position fraction must be 0.001 to 1 with at most four decimals")
-        if settled > cash:
-            raise ValidationError("Insufficient cash")
-        if settled > cash * fraction:
-            raise ValidationError("Order exceeds the per-buy cash fraction")
+        check_buy_balance(settled, portfolio, position_fraction)
     else:
-        holdings = portfolio["holdings"]
-        if not isinstance(holdings, list) or any(not isinstance(h, dict) for h in holdings):
-            raise ValidationError("Malformed holdings")
-        matches = [h for h in holdings if h["symbol"] == symbol]
-        if len(matches) > 1:
-            raise ValidationError("Duplicate holdings for currency")
-        owned = number(matches[0]["quantity"]) if matches else Decimal(0)
-        if quantity > owned:
-            raise ValidationError("Insufficient currency holdings")
+        check_sell_balance(symbol, quantity, portfolio)
+
     return ValidatedOrder(symbol, action, quantity, reason, exact, settled)
+
+
+def check_permissions(symbol, action, policy, selected_symbols):
+    selected = normalize_list(selected_symbols)
+    if not selected or not selected <= SYMBOLS:
+        raise ValidationError("Invalid selected currencies")
+    allowed = normalize_list(policy["allowed_symbols"])
+    if symbol not in SYMBOLS or symbol not in selected or symbol not in allowed:
+        raise ValidationError("Currency must be supported and selected by both strategy and policy")
+    if action in normalize_list(policy["restricted_actions"]):
+        raise ValidationError("Action is restricted by policy")
+
+
+def check_trade_quotas(policy):
+    quota_fields = [
+        ("trades_last_hour", "max_trades_per_hour"),
+        ("trades_last_day", "max_trades_per_day"),
+    ]
+    for count_name, limit_name in quota_fields:
+        count = policy[count_name]
+        limit = policy[limit_name]
+        if type(count) is not int or type(limit) is not int or min(count, limit) < 0:
+            raise ValidationError("Trade counts and limits must be nonnegative integers")
+        if count >= limit:
+            raise ValidationError("Executed trade quota is exhausted")
+
+
+def check_buy_balance(cost, portfolio, position_fraction):
+    cash = number(portfolio["cash_balance"])
+    fraction = number(position_fraction)
+    if not Decimal("0.001") <= fraction <= 1 or fraction.as_tuple().exponent < -4:
+        raise ValidationError("Position fraction must be 0.001 to 1 with at most four decimals")
+    if cost > cash:
+        raise ValidationError("Insufficient cash")
+    if cost > cash * fraction:
+        raise ValidationError("Order exceeds the per-buy cash fraction")
+
+
+def check_sell_balance(symbol, quantity, portfolio):
+    holdings = portfolio["holdings"]
+    if not isinstance(holdings, list) or any(not isinstance(h, dict) for h in holdings):
+        raise ValidationError("Malformed holdings")
+
+    owned = Decimal(0)
+    found = False
+    for holding in holdings:
+        if holding["symbol"] != symbol:
+            continue
+        if found:
+            raise ValidationError("Duplicate holdings for currency")
+        owned = number(holding["quantity"])
+        found = True
+
+    if quantity > owned:
+        raise ValidationError("Insufficient currency holdings")

@@ -14,13 +14,21 @@ has synthetic strategy settings, not an activated or validated trading theory.
 
 
 def decide(source, model, symbol="ETH"):
+    """Read evidence, ask the model, then validate. Any failure becomes HOLD."""
     try:
+        # 1. Read this trader's evidence.
         data = evidence(source, symbol)
-        candidate = model_result(model, SYSTEM_PROMPT, {"symbol": symbol, "evidence": data}, TRADER_SCHEMA)
+
+        # 2. Ask for one structured candidate.
+        payload = {"symbol": symbol, "evidence": data}
+        candidate = model_result(model, SYSTEM_PROMPT, payload, TRADER_SCHEMA)
+
+        # 3. The model cannot bypass our local checks.
         if candidate["action"] != "HOLD" and candidate["symbol"] != symbol:
             raise ValidationError("Candidate differs from assigned currency")
         return validate_order(candidate, **data)
-    except (ModelError, ValidationError, KeyError, TypeError, ValueError):
+    except (ModelError, KeyError, TypeError, ValueError):
+        # ValidationError inherits from ValueError, so it is caught here too.
         # A local HOLD is never queued or sent to Ledger.
         return validate_order(
             {"symbol": symbol, "action": "HOLD", "quantity": 0,
