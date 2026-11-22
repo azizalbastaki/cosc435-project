@@ -1,5 +1,123 @@
 # COSC 435 AI Security Engineering
 
+## Milestone 4: offline Trader and Guardian flow
+
+The Guardian reads from Ledger, not from the trader. This milestone models that
+boundary using a simulated queue and separate fixture evidence sources:
+
+```text
+Trader reads evidence -> model candidate -> local validation
+                                  |
+                         simulated Ledger queue
+                                  |
+Guardian reads pending order + its own policy/portfolio/quote/strategy
+    -> hard rules -> model review -> fresh evidence + final hard rules
+```
+
+`trader.py` and `guardian.py` now implement those offline cycles.
+`agent_contracts.py` defines their separate prompts' JSON contracts and selects
+the evidence fields allowed into model payloads. `offline_demo.py` supplies the
+fake Ledger and test models. No agent can call a Ledger write endpoint here.
+
+Run the deterministic demo (no credentials or network):
+
+```sh
+python offline_demo.py
+python offline_demo.py --scenario oversized
+python offline_demo.py --scenario unsupported-sale
+python -m unittest discover -s tests -v
+```
+
+Expected outcomes: the normal scripted trader's 0.1 ETH BUY is APPROVE; the
+10 ETH BUY and the 0.3 ETH SELL with only 0.2 ETH owned are BLOCK. Attack cases
+deliberately inject a pending order past trader validation to prove the Guardian
+does its own checks. They do not use the real Ledger Attack Simulator. A demo
+APPROVE is a local result only: it creates no fill and changes no balances.
+
+To use actual Muse decisions with the same synthetic Ledger data, explicitly run:
+
+```sh
+python offline_demo.py --live-model --config config.json
+```
+
+This makes up to two billable model requests, with different role prompts and
+fresh model messages for each role. It does not share trader conversation history
+with the Guardian. A trader HOLD leaves the queue empty; a Guardian hard-rule
+failure skips its model call. Live-model outcomes are not deterministic. The
+default scripted mode is only a test double, not evidence of actual LLM use.
+
+The Guardian ignores claimed trader validation, requested prices, and estimated
+amounts. It independently calculates amounts, checks policy/quotas/funds/holdings,
+and escalates at or above the configured threshold. MODIFY must strictly decrease
+quantity. APPROVE/MODIFY trigger another read of policy, portfolio, quote, and
+strategy before the final check. Model faults or missing evidence produce a local
+ESCALATE; trader model/validation faults produce a local HOLD. Raw model reasoning
+and full source replies are not printed by the demo.
+
+These are testable agent building blocks, not the completed live system. The
+fixture strategy is not a submitted theory; active-theory validation and matching
+version snapshots, replay/signals/news, persisted proposal/review recovery,
+separate live role credentials, polling/cooldown handling, and live transport
+remain to be implemented. In a later live milestone, the Guardian will use its
+guardian-scoped key to GET `trade_pending.php`, `policies.php`, `portfolio.php`,
+and `market_prices.php` directly from Ledger, then submit its review only after
+the final recheck. No new live endpoints are enabled in this milestone.
+
+AI assistance (2026-11-22): Codex implemented the separate offline agent cycles,
+simulated queue, independent evidence reads, and tests for attacks and evidence
+changing while the model reviews an order.
+
+## Milestone 3: Muse model adapter
+
+`model_adapter.py` provides `MuseAdapter.generate(system_prompt, payload, schema)`.
+It calls Meta's model API, then validates the JSON response locally. This is the
+shared model transport for the trader and Guardian. Their offline decision cycles
+are described above; live Ledger integration is still pending.
+
+The ignored `config.json` may now include the four Muse fields shown in
+`config.example.json`: `LLM_PROVIDER` (`meta_muse`), `META_BASE_URL`
+(`https://api.meta.ai/v1`), `MUSE_MODEL` (`muse-spark-1.3`), and `META_API_KEY`.
+Keep your real values only in local config. Do not overwrite an existing private
+config with the template. Ledger-only configs still work for the Ledger check.
+`configuration.py` accepts only known string fields and rejects duplicate names;
+the Ledger loader returns only its own two settings. Guardian credentials will
+use a separate role config in a later step.
+
+```sh
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
+
+To explicitly make **one billable model request** with fixed synthetic data:
+
+```sh
+python model_smoke_test.py --config config.json
+```
+
+Success prints only that the structured response validated. No Ledger requests,
+portfolio data, trading proposals, or reviews are involved. Exit 1 means config,
+provider access, or response validation failed. The program does not retry.
+
+The adapter follows Appendix C's Meta example, using the OpenAI-compatible SDK
+with Meta's base URL (the request goes to Meta, not OpenAI). It requests a strict
+JSON schema, uses a 30-second timeout and zero SDK retries, disables redirects
+and ambient proxies, and rejects refusals, truncated output, malformed JSON,
+duplicate fields, non-finite numbers, and schema mismatches. Errors never echo
+provider bodies. It also restricts the destination to Meta and rejects known
+configured secrets or credential-like payload field names before sending.
+These checks do not replace constructing prompts from explicitly selected data;
+never pass configuration or headers as model input. The key is used only for
+HTTP authentication. Ledger keys never belong in model messages.
+
+The calling trader must HOLD on `ModelError`; the future Guardian must ESCALATE
+when Ledger is available, or leave the order pending during Ledger cooldown.
+Schema validation is only a format check; local order/Guardian rules still apply.
+
+Reference: [Meta structured output documentation](https://dev.meta.ai/docs/structured-output).
+AI assistance (2026-11-22): Codex added the adapter, separate model connection
+check, shared config parsing, and mocked failure/credential-isolation tests.
+
 ## Milestone 2: offline local order validation
 
 `validation.py` now provides `validate_order`, a pure function for checking a
@@ -71,7 +189,8 @@ section before committing this milestone.
 Milestone 1: a one-shot, read-only Ledger smoke test. It reads the portfolio,
 security policy, and selected currency's market price with one trader client.
 It needs no active theory and sends no orders, reviews, or HOLD entries.
-The existing trader.py, guardian.py, and market.py remain empty for later steps.
+The original trader.py and guardian.py scaffolds now host the offline cycles
+described above; market.py remains empty for the replay milestone.
 
 ## Setup and run
 
@@ -147,8 +266,8 @@ Section 7.2, and configuration names use Appendix D.
   15-second fallback. The CLI exits on cooldown instead of running a loop.
 - Disabled ambient proxies/.netrc via session.trust_env=False and added session
   cleanup. Networks requiring a proxy/custom CA need an explicit future setup.
-- Tightened URL/key checks, added an 8 KiB configuration cap with exactly two
-  string fields, and validated displayed response fields. The summary replaces
+- Tightened URL/key checks, added an 8 KiB configuration cap with known
+  string fields (now including optional Muse settings), and validated displayed response fields. The summary replaces
   the scaffold's raw dictionary printing; monetary display uses Decimal.
 
 ## Before committing

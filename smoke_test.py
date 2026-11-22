@@ -1,31 +1,14 @@
 """One-shot Ledger connectivity check; no theory or trading operations."""
 
 import argparse
-import json
 import math
 import sys
 from decimal import Decimal
 
 from client import ApiError, Cooldown, LedgerClient
+from configuration import ledger_config as load_config
 
 SYMBOLS = ("BTC", "ETH", "DOGE", "XMR", "XRP", "SOL")
-CONFIG_LIMIT = 8192
-
-
-def load_config(path):
-    try:
-        with open(path, "rb") as handle:
-            raw = handle.read(CONFIG_LIMIT + 1)
-        if len(raw) > CONFIG_LIMIT:
-            raise ValueError
-        data = json.loads(raw)
-        if (not isinstance(data, dict)
-                or set(data) != {"LEDGER_BASE_URL", "TRADER_API_KEY"}
-                or any(not isinstance(v, str) or not v.strip() for v in data.values())):
-            raise ValueError
-        return data
-    except (OSError, ValueError, UnicodeError):
-        raise ValueError("Cannot load config: use the two string fields in config.example.json (max 8 KiB)") from None
 
 
 def number(obj, field):
