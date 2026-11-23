@@ -1,5 +1,140 @@
 # COSC 435 AI Security Engineering
 
+## Guardian dry run with live evidence and Muse
+
+Create the separate role config if it does not exist, then edit it locally:
+
+```sh
+cp -n config.guardian.example.json config.guardian.json
+chmod 600 config.guardian.json
+```
+
+Set `GUARDIAN_API_KEY` to the guardian-scoped Ledger key and fill the four Muse
+settings. The Meta key may be the same provider key as the trader's, but never
+put `TRADER_API_KEY` in the Guardian config. Both example files must stay placeholders.
+The guardian config remains Git-ignored. Existing two-field guardian configs still
+work for the observer command; add Muse settings before model reviews.
+
+```sh
+source .venv/bin/activate
+python guardian_dry_run.py --config config.guardian.json
+python -m unittest discover -s tests -v
+```
+
+`guardian_live.py` supplies the existing Guardian review function with real data:
+one pending order, independently read policy/portfolio, a replay-verified quote
+and signals, and a submitted theory matching the order's **ID and version**.
+No trader program or trader-local validation result is consulted. The model sees
+only selected evidence; all prose stays untrusted. Approved/modified outcomes
+must pass another policy/portfolio/theory/quote read and final hard-rule checks.
+The model adapter now accepts a guardian role config and excludes that role key
+from prompts just as it excludes the trader key.
+
+If the latest theory differs from the pending order's version, the dry run returns
+local ESCALATE rather than applying the wrong strategy. Historical theory snapshot
+storage is not implemented yet. Custom strategies also escalate pending explicit
+rule implementation. Missing evidence, replay mismatch, or model failure escalates
+locally; Ledger cooldown stops and leaves the order pending. An empty queue prints
+NO_PENDING and never initializes Muse. Do not create trades just to test this.
+
+This command may make one billable Muse call, sending selected simulated-account
+and theory data to Meta. It makes none when the queue is empty or hard rules block
+the order first. It never submits an APPROVE/MODIFY/BLOCK/ESCALATE to Ledger, even
+when the printed local outcome is APPROVE. Output excludes raw model reasoning,
+theory prose, news, credentials, and request headers. Exit 0 means a local result
+was produced (including ESCALATE), 1 means startup/config failure, 2 means cooldown.
+
+Before live review submission, persistent recovery, theory snapshots, pending-order
+state rechecks, and a deliberate write milestone are still required. No new Ledger
+endpoints or write permissions were added here.
+AI assistance (2026-11-23): Codex connected the live Guardian source and Muse role
+configuration and tested independent evidence, theory-version changes, refreshed
+prices, model failure, cooldown, and empty-queue behavior with mocks.
+
+## Trader dry run with live data and Muse
+
+```sh
+source .venv/bin/activate
+python trader_dry_run.py --config config.json --symbol ETH
+```
+
+This command reads your submitted theory, policy, portfolio, relevant news, and
+replay-verified quote/signals. It sends selected evidence (including your theory
+text and simulated account balances) to **Meta Muse** for one billable model
+decision. Ledger/provider keys stay out of prompts. It prints only the validated
+action, quantity, theory identity, and quote—not raw model reasoning or news.
+No proposal, HOLD entry, or review is submitted to Ledger.
+
+The flow in `trader_dry_run.py` has four steps: gather evidence, replay-check the
+quote, ask Muse, then validate its answer. Momentum and mean-reversion directions
+are checked locally. Stop-loss/take-profit exits have priority; buys are bounded
+by cash fraction and policy ceiling, sells by owned units and policy ceiling.
+HOLD is always an option. Existing policy/quota/funds/quantity rules apply after
+the model call, and the model cannot enlarge the computed quantity bounds.
+Custom strategies HOLD until their written rules are explicitly implemented.
+The signal-only tolerance is 1e-12 percentage points; no tolerance relaxes money
+or policy limits. News trust flags are metadata, not permission to follow news
+instructions. Unexpected/oversized news data fails closed.
+
+Exit 0 means the model returned a valid local candidate (including HOLD), 1 means
+a local HOLD due to missing/invalid evidence or model output, and 2 means Ledger
+cooldown. This is a snapshot analysis, not execution authorization. No pending
+order reconciliation or post-model live quote refresh is attempted here because
+there is no write path. Those are required before enabling proposals. The
+offline demo and live Guardian observer remain separate commands.
+
+Test with `python -m unittest discover -s tests -v`. Mocked tests cover payload
+field selection, news injection remaining data, direction/size checks, risk-exit
+priority, model failures, replay failures, and resource cleanup. The only new
+Ledger endpoint is GET `market_news.php`; all POST requests stay disabled.
+AI assistance (2026-11-23): Codex implemented and tested this one-shot dry run.
+
+## Market replay and signals
+
+```sh
+source .venv/bin/activate
+python market_check.py --config config.json --symbol ETH
+python -m unittest discover -s tests -v
+```
+
+`market.py` follows the Student Development Guide Appendix A reference formula:
+tick-aligned power-law trend, periodic waves, two integer noise steps, price
+clamping, and eight-decimal half-up rounding. `market_check.py` reads the member's
+validated theory, a current quote, and `market_model.php`, then rebuilds 61 evenly
+spaced prices over the theory's lookback. It reports lookback return and mean
+deviation. Momentum uses return; mean reversion uses negative mean deviation.
+Custom strategies get both measurements but no invented trading signal.
+
+The replayed final price must agree with the quote within $0.00000001. A model
+version or price mismatch refreshes the descriptor once, then raises a local HOLD
+if still inconsistent. `MarketReader` caches descriptors for five minutes when
+reused across cycles. It also refuses quotes ahead of the server clock or more
+than two ticks behind it. Cooldown exits with code 2; other invalid evidence exits
+with code 1. Neither causes an order or model call.
+
+Live samples are bounded by the quote timestamp, not a cached `replay_end_unix`.
+Insufficient history causes HOLD. `price_at(..., quote_time=...)` enforces the
+upper bound; omitting it is reserved for standalone synthetic formula tests.
+Published day-365 fixtures are tests only and never feed a live signal.
+
+The selected public BTC/ETH formula parameters in
+`tests/fixtures/market_model.json` were fetched on 2026-11-23. They contain no
+credentials or portfolio data and reproduce the guide's published day 0/30/365
+BTC quote fixtures and day 0/365 trend fixtures. Live code always fetches the
+descriptor, never loads this test fixture. Tests additionally cover cache refresh,
+version mismatch, insufficient history, timestamp boundaries, invalid parameters,
+and hand-calculated signals. Formula arithmetic preserves the reference floating-
+point operation order; percentage calculations use Decimal on replayed prices.
+
+This command provides evidence, not BUY/SELL decisions. Stop-loss/take-profit
+evaluation, order sizing, news/model integration, and live agent execution are
+still separate steps. The public deterministic generator can compute future
+prices; simulator profit does not establish real-world forecasting skill.
+
+AI assistance (2026-11-23): Codex adapted the Appendix A formula, implemented
+read-only replay/signal checking, and added offline tests. The client now permits
+the market-model GET; all POST operations remain disabled.
+
 ## Submitted theory check
 
 Read your existing submitted theory with the trader key and check its policy

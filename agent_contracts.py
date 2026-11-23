@@ -1,5 +1,7 @@
 """Model contracts and fixture-only evidence boundary for the offline agents."""
 
+from decimal import Decimal
+
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as SchemaError
 
@@ -11,6 +13,17 @@ POLICY_FIELDS = (
     "max_trades_per_hour", "max_trades_per_day", "trades_last_hour",
     "trades_last_day", "escalation_threshold",
 )
+
+
+def json_evidence(value):
+    """Preserve exact Decimal evidence as strings; never serialize config here."""
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, dict):
+        return {key: json_evidence(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [json_evidence(item) for item in value]
+    return value
 
 TRADER_SCHEMA = {
     "type": "object", "additionalProperties": False,

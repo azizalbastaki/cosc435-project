@@ -1,0 +1,51 @@
+{
+  "version": "ledger-powerlaw-v1",
+  "epoch_unix": 1767225600,
+  "tick_seconds": 5,
+  "power_timescale_days": 365,
+  "price_decimals": 8,
+  "min_price": 1e-08,
+  "max_price": 10000000,
+  "noise_modulus": 2147483647,
+  "noise_multiplier": 48271,
+  "cycles": [
+    {
+      "period_seconds": 600,
+      "phase": 0
+    },
+    {
+      "period_seconds": 7200,
+      "phase": 1.1
+    },
+    {
+      "period_seconds": 86400,
+      "phase": 2.3
+    }
+  ],
+  "assets": {
+    "BTC": {
+      "base_price": 64000,
+      "power_exponent": 0.45,
+      "phase": 0,
+      "cycle_amplitudes": [
+        0.004,
+        0.014,
+        0.045
+      ],
+      "noise_amplitude": 0.0008,
+      "noise_seed": 104729
+    },
+    "ETH": {
+      "base_price": 3200,
+      "power_exponent": 0.6,
+      "phase": 0.7,
+      "cycle_amplitudes": [
+        0.006,
+        0.02,
+        0.06
+      ],
+      "noise_amplitude": 0.0012,
+      "noise_seed": 130363
+    }
+  }
+}

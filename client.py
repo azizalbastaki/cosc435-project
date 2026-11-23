@@ -8,7 +8,10 @@ from urllib.parse import urlsplit
 
 import requests
 
-ENDPOINTS = {"portfolio.php", "policies.php", "market_prices.php", "theory.php"}
+ENDPOINTS = {
+    "portfolio.php", "policies.php", "market_prices.php", "theory.php",
+    "market_model.php", "market_news.php",
+}
 
 
 class ApiError(RuntimeError):

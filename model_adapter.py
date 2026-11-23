@@ -50,13 +50,13 @@ class MuseAdapter:
         )
 
     @classmethod
-    def from_config(cls, path):
-        data = read_config(path)
+    def from_config(cls, path, *, role="trader"):
+        data = read_config(path, role=role)
         if not MUSE_FIELDS <= data.keys() or data["LLM_PROVIDER"] != "meta_muse":
             raise ValueError("Configure the four Muse fields with LLM_PROVIDER=meta_muse")
         return cls(api_key=data["META_API_KEY"], base_url=data["META_BASE_URL"],
                    model=data["MUSE_MODEL"],
-                   forbidden_secrets=(data.get("TRADER_API_KEY", ""),))
+                   forbidden_secrets=(data.get("TRADER_API_KEY", ""), data.get("GUARDIAN_API_KEY", "")))
 
     def close(self):
         self._client.close()
