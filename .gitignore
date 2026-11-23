@@ -10,3 +10,4 @@ config.*.json
 !config.guardian.example.json
 .env
 .env.*
+.ledger-state/

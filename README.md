@@ -1,5 +1,51 @@
 # COSC 435 AI Security Engineering
 
+## Recovery journal (offline safety building block)
+
+```sh
+.venv/bin/python recovery_demo.py
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+The demo simulates a lost proposal response and a restart. It uses a temporary
+SQLite journal and proves that a second proposal is refused. It makes no network
+requests and does not touch your account or real pending orders.
+
+`recovery.py` provides a `ProposalJournal` for a future write-enabled trader:
+
+1. `reserve(order, theory_id, theory_version)` saves a validated BUY/SELL intent.
+2. `mark_attempt(intent_id)` commits UNCERTAIN **before** sending any HTTP request.
+3. A received proposal reply can be recorded as PENDING or REJECTED.
+4. PENDING and ESCALATED remain unresolved. A matching terminal history record
+   (EXECUTED with a positive fill, BLOCKED, or REJECTED) releases the proposal gate.
+
+Only an unsent PLANNED intent may be cancelled. An UNCERTAIN attempt cannot be
+resent. If the transaction ID was lost, the journal refuses to infer it from a
+similar-looking history row: deliberate investigation and a future explicit
+resolution workflow are required. It never guesses that an absent record means
+the write failed. Reconciliation checks known transaction identity, symbol,
+action, theory identity/version, requested quantity, and positive execution fields.
+
+SQLite commits preserve state across restarts, and a unique index prevents two
+processes sharing the same journal from reserving simultaneous open proposals.
+Use one stable journal per Ledger account, for example
+`.ledger-state/my-account.sqlite3`. That directory is Git-ignored; databases use
+owner-only file permissions. The journal stores selected order numbers and
+states, not keys, configuration, theory prose, or model reasoning. It is not a
+complete execution audit log or theory snapshot store.
+
+This module is **not wired to live submission**: POST remains disabled and the
+existing dry runs do not reserve journal entries. Future work must add reads of
+Ledger history/pending state, account binding, explicit uncertain-ID resolution,
+Guardian review recovery, and submission integration. A journal cannot detect
+orders created by other clients/devices, and deleting it is not reconciliation.
+The helper must be used on every future write path for its protection to apply.
+
+AI assistance (2026-11-23): Codex implemented the local journal and tests for
+restart safety, competing connections, invalid acknowledgements/history, terminal
+state handling, and credential-free stored fields. Based on the guide's
+Section 6.2 uncertain-write rule and Section 7.4 recovery requirements.
+
 ## Guardian dry run with live evidence and Muse
 
 Create the separate role config if it does not exist, then edit it locally:
