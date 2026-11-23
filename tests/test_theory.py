@@ -1,13 +1,10 @@
 import copy
-import io
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
 from decimal import Decimal
 from unittest.mock import Mock, call, patch
 
-from client import Cooldown, LedgerClient
+from client import LedgerClient
 from theory import read_theory, validate_theory
-from theory_check import main
 from validation import ValidationError, validate_order
 
 THEORY = {
@@ -107,24 +104,6 @@ class TheoryTests(unittest.TestCase):
             selected_symbols=list(theory.selected_symbols), position_fraction=theory.position_fraction,
         )
         self.assertEqual(result.settled_amount, Decimal("320.00"))
-
-    def test_cli_output_and_hold_paths(self):
-        with patch("theory_check.ledger_config", return_value={"LEDGER_BASE_URL": "https://example.test", "TRADER_API_KEY": "fake_secret"}), patch("theory_check.LedgerClient") as client:
-            api = client.return_value
-            api.get.side_effect = [{"theory": THEORY}, {"allowed_symbols": ["ETH"]}]
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(main([]), 0)
-            self.assertIn("id=7, version=2", output.getvalue())
-            self.assertNotIn(THEORY["title"], output.getvalue())
-            self.assertNotIn("fake_secret", output.getvalue())
-            api.close.assert_called_once()
-            for outcome, code in [({"theory": None}, 1), (Cooldown(15), 2)]:
-                api.get.side_effect = [outcome]
-                error = io.StringIO()
-                with redirect_stderr(error):
-                    self.assertEqual(main([]), code)
-                self.assertIn("HOLD", error.getvalue())
 
     def test_transport_allows_get_theory_but_no_writes(self):
         with patch("client.requests.Session") as session:

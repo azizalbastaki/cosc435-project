@@ -6,7 +6,60 @@ from datetime import datetime, timezone
 import json
 
 from guardian import review_next
-from offline_demo import FixtureSource, ScriptedModel
+
+
+FIXTURE = {
+    "policy": {"allowed_symbols": ["ETH"], "restricted_actions": ["WITHDRAW"],
+               "max_transaction_amount": 1000, "max_trades_per_hour": 10,
+               "max_trades_per_day": 50, "trades_last_hour": 0, "trades_last_day": 0,
+               "escalation_threshold": 750},
+    "portfolio": {"cash_balance": 10000, "holdings": [{"symbol": "ETH", "quantity": 0.2}]},
+    "quote": {"symbol": "ETH", "price": 3200},
+    "strategy": {"selected_symbols": ["ETH"], "position_fraction": 0.05},
+}
+
+
+class FixtureSource:
+    """Role-local copies of evidence; only the simulated queue is shared."""
+    def __init__(self, queue, fixture=None):
+        self.queue = queue
+        self.data = deepcopy(FIXTURE if fixture is None else fixture)
+        self.reads = []
+
+    def _read(self, name):
+        self.reads.append(name)
+        return deepcopy(self.data[name])
+
+    def policy(self):
+        return self._read("policy")
+
+    def portfolio(self):
+        return self._read("portfolio")
+
+    def quote(self, symbol):
+        quote = self._read("quote")
+        if quote["symbol"] != symbol:
+            raise ValueError("Fixture has no quote for selected symbol")
+        return quote
+
+    def strategy(self):
+        return self._read("strategy")
+
+    def pending(self):
+        self.reads.append("pending")
+        return deepcopy(self.queue[0]) if self.queue else None
+
+
+class ScriptedModel:
+    """Explicit test double, not an LLM or a replacement for course LLM use."""
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    def generate(self, system_prompt, payload, schema):
+        self.calls += 1
+        return deepcopy(self.result)
+
 
 
 def run_scenarios():

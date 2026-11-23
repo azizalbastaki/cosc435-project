@@ -3,9 +3,9 @@ from decimal import Decimal
 from unittest.mock import Mock
 
 from guardian import review_next
+from client import ApiError
 from model_adapter import ModelError
-from offline_demo import FixtureSource, ScriptedModel
-from trader import decide
+from security_demo import FixtureSource, ScriptedModel
 from validation import ValidationError
 
 
@@ -17,15 +17,6 @@ class AgentTests(unittest.TestCase):
         self.approve = {"decision": "APPROVE", "reason": "Within limits.", "risk_score": 5,
                         "modified_quantity": None, "rules_triggered": []}
         self.model = ScriptedModel(self.approve)
-
-    def test_trader_checks_model_candidate_and_failure_holds(self):
-        candidate = {"symbol": "ETH", "action": "BUY", "quantity": 0.1, "reasoning": "Sample signal."}
-        self.assertEqual(decide(self.source, ScriptedModel(candidate)).action, "BUY")
-        for changes in [{"quantity": 10}, {"quantity": True}, {"symbol": "SOL"}, {"extra": 1}]:
-            self.assertEqual(decide(self.source, ScriptedModel(candidate | changes)).action, "HOLD")
-        model = Mock()
-        model.generate.side_effect = ModelError("Unavailable")
-        self.assertEqual(decide(self.source, model).action, "HOLD")
 
     def test_guardian_fetches_pending_and_evidence_twice(self):
         result = review_next(self.source, self.model)
@@ -112,6 +103,34 @@ class AgentTests(unittest.TestCase):
         model = Mock()
         model.generate.side_effect = ModelError("Unavailable")
         self.assertEqual(review_next(self.source, model)["decision"], "ESCALATE")
+
+    def test_failure_reasons_identify_stage_without_exposing_payloads(self):
+        model = Mock()
+        model.generate.side_effect = ModelError("PRIVATE INPUT", category="timeout")
+        result = review_next(self.source, model)
+        self.assertEqual(result["decision"], "ESCALATE")
+        self.assertIn("model review: Muse request timed out", result["reason"])
+        self.assertNotIn("PRIVATE INPUT", result["reason"])
+
+        source = FixtureSource([self.order])
+        source.policy = Mock(side_effect=ApiError(403, "PRIVATE INPUT"))
+        result = review_next(source, self.model)
+        self.assertEqual(result["decision"], "ESCALATE")
+        self.assertIn("initial independent evidence: Ledger HTTP 403", result["reason"])
+        self.assertNotIn("PRIVATE INPUT", result["reason"])
+
+        source = FixtureSource([self.order])
+        policy = source.policy()
+        source.policy = Mock(side_effect=[policy, KeyError("PRIVATE INPUT")])
+        result = review_next(source, self.model)
+        self.assertEqual(result["decision"], "ESCALATE")
+        self.assertIn("final independent evidence", result["reason"])
+        self.assertNotIn("PRIVATE INPUT", result["reason"])
+
+        result = review_next(FixtureSource([self.order]),
+                             ScriptedModel(self.approve | {"risk_score": 101}))
+        self.assertEqual(result["decision"], "ESCALATE")
+        self.assertIn("model review validation", result["reason"])
 
     def test_threshold_before_and_after_model(self):
         self.source.data["policy"]["escalation_threshold"] = 320

@@ -6,7 +6,7 @@ import re
 import httpx
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
-from openai import APIError, OpenAI
+from openai import APIError, APITimeoutError, OpenAI
 
 from configuration import MUSE_FIELDS, read_config, unique_object
 
@@ -14,6 +14,23 @@ from configuration import MUSE_FIELDS, read_config, unique_object
 class ModelError(RuntimeError):
     """Safe model failure. Trader must HOLD; Guardian must not approve on failure."""
 
+    def __init__(self, message, *, category="unknown", status=None):
+        super().__init__(message)
+        self.category = category
+        self.status = status if type(status) is int and 100 <= status <= 599 else None
+
+
+    def safe_summary(self):
+        """Fixed diagnostic text; never include provider bodies or model output."""
+        if self.category == "response":
+            return "Muse reply was incomplete, refused, or failed the JSON schema checks."
+        if self.category == "timeout":
+            return "Muse request timed out. No automatic retry was attempted."
+        if self.category == "request":
+            if self.status is not None:
+                return f"Muse provider request failed (HTTP {self.status})."
+            return "Muse request failed without an HTTP status; check connectivity."
+        return "Muse request or structured response failed."
 
 def reject_constant(value):
     raise ValueError("Non-finite JSON number")
@@ -89,8 +106,10 @@ class MuseAdapter:
                     "name": "agent_response", "strict": True, "schema": schema}},
                 max_completion_tokens=2048,
             )
-        except APIError:
-            raise ModelError("Muse request failed; check access, billing, model, and connectivity") from None
+        except APIError as error:
+            category = "timeout" if isinstance(error, APITimeoutError) else "request"
+            raise ModelError("Muse request failed; check access, billing, model, and connectivity",
+                             category=category, status=getattr(error, "status_code", None)) from None
         try:
             if len(reply.choices) != 1:
                 raise ValueError
@@ -110,4 +129,5 @@ class MuseAdapter:
             Draft202012Validator(schema).validate(result)
             return result
         except (ValueError, TypeError, AttributeError, ValidationError):
-            raise ModelError("Muse returned an incomplete, refused, or invalid structured response") from None
+            raise ModelError("Muse returned an incomplete, refused, or invalid structured response",
+                             category="response") from None

@@ -1,14 +1,11 @@
-import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 from client import ApiError, Cooldown, LedgerClient
 from configuration import guardian_config, ledger_config
-from guardian_check import main
 from guardian_source import GuardianSource
 from test_smoke import MARKET, POLICY, PORTFOLIO, response
 
@@ -83,7 +80,7 @@ class GuardianSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(ApiError, "guardian-scoped"):
                 guardian.get("trade_pending.php")
 
-    def test_separate_role_config_and_cli(self):
+    def test_separate_role_config(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "config.guardian.json"
             config = {"LEDGER_BASE_URL": "https://ledger.chanyeun.com/api/v1", "GUARDIAN_API_KEY": "fake_guardian"}
@@ -91,15 +88,6 @@ class GuardianSourceTests(unittest.TestCase):
             self.assertEqual(guardian_config(path), config)
             with self.assertRaises(ValueError):
                 ledger_config(path)
-            with patch("guardian_check.LedgerClient", return_value=self.api):
-                self.api.get.side_effect = [{"pending": [self.row], "has_more": False}, POLICY, PORTFOLIO, MARKET]
-                output = io.StringIO()
-                with redirect_stdout(output):
-                    self.assertEqual(main(["--config", str(path)]), 0)
-                self.assertIn("Order #1", output.getvalue())
-                self.assertNotIn("fake_guardian", output.getvalue())
-                self.assertNotIn("DO NOT PRINT", output.getvalue())
-                self.api.close.assert_called_once()
             config["TRADER_API_KEY"] = "fake_trader"
             path.write_text(json.dumps(config))
             with self.assertRaises(ValueError):

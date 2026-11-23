@@ -1,10 +1,12 @@
-"""One controlled lifecycle. Dry-run by default; --submit explicitly enables writes."""
+"""Bounded trading cycles. Dry-run by default; --submit explicitly enables writes."""
 
 import argparse
 from contextlib import ExitStack
 import hashlib
 import math
 import sys
+import time
+from datetime import datetime, timezone
 
 from client import ApiError, Cooldown, LedgerClient, UncertainWrite
 from configuration import guardian_config, ledger_config
@@ -14,7 +16,7 @@ from market import MarketReader
 from model_adapter import ModelError, MuseAdapter
 from recovery import ProposalJournal, RecoveryError, positive_id
 from theory import read_theory
-from trader_dry_run import decide_live, decision_bounds
+from trader_dry_run import decide_live, decision_bounds, failure_message
 from validation import SYMBOLS, ValidationError, validate_order
 
 
@@ -49,16 +51,16 @@ def recheck_candidate(api, order, theory):
     """Repeat trader checks after its model call with a fresh quote and balances."""
     current = read_theory(api, order.symbol)
     if current != theory:
-        raise ValidationError("Theory changed during the trader decision")
+        raise ValidationError("Theory changed during the trader decision", "theory_changed")
     policy = api.get("policies.php")
     portfolio = api.get("portfolio.php")
     signals = MarketReader(api).read(order.symbol, theory.lookback_minutes)
     bounds = decision_bounds(theory, signals, policy, portfolio, order.symbol)
     if order.action not in bounds["allowed_actions"]:
-        raise ValidationError("Fresh evidence no longer supports this action")
+        raise ValidationError("Fresh evidence no longer supports this action", "signal_changed")
     maximum = bounds["max_buy_quantity"] if order.action == "BUY" else bounds["max_sell_quantity"]
     if order.quantity > maximum:
-        raise ValidationError("Fresh evidence reduced the allowed quantity")
+        raise ValidationError("Fresh evidence reduced the allowed quantity", "quantity_bound_changed")
     return validate_order(
         {"symbol": order.symbol, "action": order.action, "quantity": order.quantity, "reasoning": order.reasoning},
         policy=policy, portfolio=portfolio,
@@ -131,16 +133,38 @@ def submit_once(trader_api, guardian_api, trader_model, guardian_model, journal,
     return review_known(trader_api, guardian_api, guardian_model, journal, journal.get(intent))
 
 
+def run_cycles(cycle, count, journal=None):
+    """Run sequentially; errors propagate so an uncertain write is never retried."""
+    for index in range(count):
+        print(f"Cycle {index + 1}/{count} | {datetime.now(timezone.utc).isoformat()}", flush=True)
+        print(cycle(), flush=True)
+        # ESCALATED can be a successful API response but is unresolved work.
+        if journal is not None and journal.open_proposal() is not None:
+            raise RecoveryError("Unresolved order remains; resolve it before running more cycles")
+        if index + 1 < count:
+            time.sleep(60)
+
+
+def dry_cycle(api, model, symbol):
+    order, theory, _ = decide_live(api, model, symbol)
+    return (f"DRY RUN: {order.action} {order.quantity:f} {symbol}; "
+            f"theory {theory.id}/v{theory.version}. Nothing submitted.")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--submit", action="store_true", help="Submit at most one simulated Ledger order and review")
+    mode.add_argument("--submit", action="store_true", help="Allow at most one simulated Ledger proposal/review per cycle")
     mode.add_argument("--reconcile-only", action="store_true", help="Read history only; never write or call models")
     parser.add_argument("--config", default="config.json")
     parser.add_argument("--guardian-config", default="config.guardian.json")
     parser.add_argument("--journal", default=".ledger-state/trader.json")
     parser.add_argument("--symbol", type=str.upper, choices=sorted(SYMBOLS), default="ETH")
+    parser.add_argument("--cycles", type=int, choices=range(1, 11), default=1,
+                        help="Run 1–10 cycles, waiting 60 seconds between them (default: 1)")
     args = parser.parse_args(argv)
+    if args.reconcile_only and args.cycles != 1:
+        parser.error("--reconcile-only runs once; omit --cycles")
     with ExitStack() as stack:
         try:
             config = ledger_config(args.config)
@@ -158,8 +182,7 @@ def main(argv=None):
             trader_model = MuseAdapter.from_config(args.config)
             stack.callback(trader_model.close)
             if not args.submit:
-                order, theory, _ = decide_live(trader_api, trader_model, args.symbol)
-                print(f"DRY RUN: {order.action} {order.quantity:f} {args.symbol}; theory {theory.id}/v{theory.version}. Nothing submitted.")
+                run_cycles(lambda: dry_cycle(trader_api, trader_model, args.symbol), args.cycles)
                 return 0
             guardian = guardian_config(args.guardian_config)
             if guardian["LEDGER_BASE_URL"].rstrip("/") != trader_api.base:
@@ -168,16 +191,21 @@ def main(argv=None):
             stack.callback(guardian_api.close)
             guardian_model = MuseAdapter.from_config(args.guardian_config, role="guardian")
             stack.callback(guardian_model.close)
-            print(submit_once(trader_api, guardian_api, trader_model, guardian_model, journal, args.symbol))
+            print("Submission enabled. Each cycle may trade simulated funds and make billable Muse calls.", flush=True)
+            run_cycles(lambda: submit_once(trader_api, guardian_api, trader_model,
+                                          guardian_model, journal, args.symbol), args.cycles, journal)
             return 0
+        except KeyboardInterrupt:
+            print("STOP: interrupted. Check the journal/history before restarting; a sent request may have completed.", file=sys.stderr)
+            return 130
         except Cooldown as exc:
             print(f"STOP: cooldown; wait at least {math.ceil(exc.seconds)} seconds and reconcile any open intent.", file=sys.stderr)
             return 2
         except (RecoveryError, UncertainWrite) as exc:
             print(f"STOP: {exc}", file=sys.stderr)
             return 1
-        except (ApiError, ModelError, ValueError, KeyError, TypeError, OSError):
-            print("STOP: validation, storage, model, or API failure. Check the journal before another submission.", file=sys.stderr)
+        except (ApiError, ModelError, ValueError, KeyError, TypeError, OSError) as exc:
+            print(f"STOP: {failure_message(exc)} Check the journal before another submission.", file=sys.stderr)
             return 1
 
 

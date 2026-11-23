@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
-from openai import APIConnectionError
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from configuration import ledger_config, read_config
 from model_adapter import ModelError, MuseAdapter
@@ -68,6 +68,7 @@ class MuseTests(unittest.TestCase):
                 self.generate()
             self.assertNotIn("fake_meta_secret", str(error.exception))
             self.assertNotIn("fake_ledger_secret", str(error.exception))
+            self.assertEqual(error.exception.category, "response")
 
     def test_truncation_refusal_and_missing_choices(self):
         for finish in ("length", "content_filter", "tool_calls"):
@@ -86,7 +87,28 @@ class MuseTests(unittest.TestCase):
         with self.assertRaises(ModelError) as error:
             self.generate()
         self.assertNotIn("fake_meta_secret", str(error.exception))
+        self.assertEqual(error.exception.category, "request")
+        self.assertIsNone(error.exception.status)
         self.call.assert_called_once()
+
+    def test_timeout_and_provider_status_are_distinct_and_safe(self):
+        from trader_dry_run import failure_message
+        request = httpx.Request("POST", "https://api.meta.ai/v1")
+        errors = [
+            (APITimeoutError(request=request), "timed out"),
+            (APIStatusError("fake_meta_secret", response=httpx.Response(429, request=request),
+                            body={"error": "fake_ledger_secret"}), "HTTP 429"),
+        ]
+        for exception, expected in errors:
+            self.call.reset_mock()
+            self.call.side_effect = exception
+            with self.assertRaises(ModelError) as error:
+                self.generate()
+            message = failure_message(error.exception)
+            self.assertIn(expected, message)
+            self.assertNotIn("fake_meta_secret", message)
+            self.assertNotIn("fake_ledger_secret", message)
+            self.call.assert_called_once()
 
     def test_invalid_endpoint_and_schema(self):
         for url in ["http://api.meta.ai/v1", "https://other.test/v1", "https://api.meta.ai/v1?x=1"]:

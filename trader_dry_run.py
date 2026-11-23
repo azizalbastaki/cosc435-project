@@ -7,6 +7,7 @@ import sys
 
 from agent_contracts import POLICY_FIELDS, TRADER_SCHEMA, json_evidence, model_result, validate_evidence
 from client import ApiError, Cooldown, LedgerClient
+from guardian import HARD_RULES
 from configuration import ledger_config
 from market import MarketReader
 from model_adapter import ModelError, MuseAdapter
@@ -87,6 +88,24 @@ def decide_live(api, model, symbol="ETH", market_reader=None):
     if checked.action == "SELL" and checked.quantity > bounds["max_sell_quantity"]:
         raise ValidationError("Model exceeded the computed SELL bound")
     return checked, theory, signals
+
+
+def failure_message(error):
+    """Report a safe category, never server/model messages or input values."""
+    if isinstance(error, ValidationError):
+        known = HARD_RULES | {"theory_changed", "signal_changed", "quantity_bound_changed"}
+        rule = error.rule if error.rule in known else "invalid_input"
+        return f"Local validation failed: {rule}."
+    if isinstance(error, ApiError):
+        status = error.status
+        if type(status) is int and 100 <= status <= 599:
+            return f"Ledger API failed (HTTP {status})."
+        return "Ledger connection failed before a usable HTTP response."
+    if isinstance(error, ModelError):
+        return error.safe_summary()
+    if isinstance(error, OSError):
+        return "Local configuration or storage access failed."
+    return "Configuration or evidence fields were invalid."
 
 
 def main(argv=None):

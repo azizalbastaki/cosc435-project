@@ -49,7 +49,7 @@ def model_result(model, prompt, payload, schema):
     try:
         Draft202012Validator(schema).validate(result)
     except SchemaError:
-        raise ModelError("Model response does not match the agent contract") from None
+        raise ModelError("Model response does not match the agent contract", category="response") from None
     return result
 
 

@@ -73,6 +73,7 @@ def review_next(source, model):
     The source has no relationship to the trader's validation result. Missing
     evidence/model faults return ESCALATE locally; nothing is sent to Ledger.
     """
+    phase = "pending-order read"
     try:
         # 1. Read the queue, not the trader's local validation result.
         pending = source.pending()
@@ -88,6 +89,7 @@ def review_next(source, model):
         }
 
         # 2. Fetch independent evidence and enforce hard rules before the model.
+        phase = "initial independent evidence"
         data = evidence(source, order["symbol"])
         try:
             checked = validate_order(order, **data)
@@ -102,12 +104,15 @@ def review_next(source, model):
         payload = {"pending_order": model_order, "independent_evidence": data}
         if hasattr(source, "supporting_evidence"):
             payload["supporting_evidence"] = source.supporting_evidence()
+        phase = "model review"
         result = model_result(model, SYSTEM_PROMPT, json_evidence(payload), GUARDIAN_SCHEMA)
+        phase = "model review validation"
         quantity = validate_review(result, checked.quantity)
         decision = result["decision"]
         if decision in ("BLOCK", "ESCALATE"):
             return review(decision, "Guardian model requested " + decision.lower() + ".")
         # 4. APPROVE/MODIFY must pass the same checks with newly fetched evidence.
+        phase = "final independent evidence"
         fresh = evidence(source, order["symbol"])
         final_order = dict(order, quantity=quantity)
         try:
@@ -119,5 +124,12 @@ def review_next(source, model):
         if threshold_reached(final, fresh["policy"]):
             return review("ESCALATE", "Fresh amount meets the escalation threshold.")
         return review(decision, "Independent checks and final recheck passed.", final.quantity)
-    except (ApiError, ModelError, KeyError, TypeError, ValueError):
-        return review("ESCALATE", "Evidence or model review was unavailable or invalid.")
+    except ModelError as error:
+        return review("ESCALATE", f"Guardian {phase}: {error.safe_summary()}")
+    except ApiError as error:
+        status = error.status
+        detail = (f"Ledger HTTP {status}" if type(status) is int and 100 <= status <= 599
+                  else "Ledger connection failed")
+        return review("ESCALATE", f"Guardian {phase}: {detail}; independent review could not complete.")
+    except (KeyError, TypeError, ValueError):
+        return review("ESCALATE", f"Guardian {phase}: required fields or values failed local validation.")

@@ -4,6 +4,8 @@
   Student Development Guide Section 6.2 and Appendix B.
 - Keep changes small and reviewable. Existing commands remain read-only/dry-run.
   Only trade_once.py --submit may enable role-scoped proposal/review POSTs.
+  Its optional --cycles loop stays bounded and holds the journal lock across waits.
+  Stop repeated cycles on errors, cooldowns, or unresolved work; never blindly retry writes.
   Require journal protection, independent Guardian checks, and history reconciliation.
   Do not execute live writes as development verification; use mocked lifecycle tests.
 - Prefer plain functions, descriptive names, and simple persistent JSON state.
