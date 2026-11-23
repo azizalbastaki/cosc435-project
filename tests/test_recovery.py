@@ -1,7 +1,9 @@
 import tempfile
+import json
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from recovery import ProposalJournal, RecoveryError
 from validation import ValidatedOrder
@@ -11,7 +13,7 @@ class RecoveryTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        self.path = Path(self.folder.name) / "journal.sqlite3"
+        self.path = Path(self.folder.name) / "journal.json"
         self.journal = ProposalJournal(self.path)
         self.addCleanup(lambda: self.journal.close())
         self.order = ValidatedOrder("ETH", "BUY", Decimal("0.1"), "PRIVATE_PROSE",
@@ -43,13 +45,29 @@ class RecoveryTests(unittest.TestCase):
             self.journal.reconcile_known(intent, self.record)
 
     def test_two_connections_cannot_reserve_two_open_proposals(self):
-        second = ProposalJournal(self.path)
-        try:
-            self.journal.reserve(self.order, 7, 1)
-            with self.assertRaises(RecoveryError):
-                second.reserve(self.order, 7, 1)
-        finally:
-            second.close()
+        with self.assertRaisesRegex(RecoveryError, "Another run"):
+            ProposalJournal(self.path)
+
+    def test_file_is_readable_json_and_failed_replace_preserves_previous_state(self):
+        intent = self.journal.reserve(self.order, 7, 1)
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["proposals"][0]["state"], "PLANNED")
+        with patch("recovery.os.replace", side_effect=OSError("Simulated disk failure")):
+            with self.assertRaises(OSError):
+                self.journal.mark_attempt(intent)
+        self.assertEqual(json.loads(self.path.read_text()), saved)
+
+    def test_corrupt_file_fails_closed(self):
+        self.journal.close()
+        self.path.write_text('{"version":1,"identity":null,"proposals":[{}]}')
+        with self.assertRaises(RecoveryError):
+            ProposalJournal(self.path)
+
+    def test_legacy_database_is_not_silently_abandoned(self):
+        self.journal.close()
+        self.path.with_suffix(".sqlite3").write_bytes(b"legacy state")
+        with self.assertRaisesRegex(RecoveryError, "migration"):
+            ProposalJournal(self.path)
 
     def test_only_unsent_intent_can_be_cancelled(self):
         intent = self.journal.reserve(self.order, 7, 1)

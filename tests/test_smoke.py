@@ -76,7 +76,7 @@ class SmokeTests(unittest.TestCase):
 
     def test_no_writes_or_other_endpoints(self):
         for method, endpoint in [("POST", "portfolio.php"), ("GET", "trade_propose.php"),
-                                 ("GET", "transactions.php"), ("GET", "https://other.test")]:
+                                 ("GET", "guardian_logs.php"), ("GET", "https://other.test")]:
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 self.api.request(method, endpoint)
         self.session.request.assert_not_called()

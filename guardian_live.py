@@ -4,19 +4,23 @@ from dataclasses import asdict
 
 from market import MarketReader
 from theory import positive_integer, validate_theory
+from strategy import decision_bounds
 from validation import SYMBOLS, ValidationError, number
 
 
 class LiveGuardianSource:
-    def __init__(self, api):
+    def __init__(self, api, *, target_id=None):
         if api.role != "guardian":
             raise ValueError("A guardian-scoped client is required")
         self.api = api
+        self.target_id = target_id
         self.market = MarketReader(api)
         self.order = None
         self.theory = None
         self.signals = None
         self.holdings = []
+        self.current_policy = None
+        self.current_portfolio = None
 
     def pending(self):
         reply = self.api.get("trade_pending.php", limit=1)
@@ -26,6 +30,8 @@ class LiveGuardianSource:
         if not rows:
             return None
         row = rows[0]
+        if self.target_id is not None and row.get("transaction_id") != self.target_id:
+            raise ValidationError("Oldest pending order is not the expected transaction")
         # Do not retain queue context, estimated amounts, or trader labels.
         order = {name: row[name] for name in (
             "transaction_id", "theory_id", "theory_version", "symbol", "action",
@@ -40,10 +46,12 @@ class LiveGuardianSource:
     def policy(self):
         # Each initial/final evidence sweep must recheck theory provenance too.
         self.theory = None
-        return self.api.get("policies.php")
+        self.current_policy = self.api.get("policies.php")
+        return self.current_policy
 
     def portfolio(self):
         portfolio = self.api.get("portfolio.php")
+        self.current_portfolio = portfolio
         self.holdings = []
         for holding in portfolio["holdings"]:
             self.holdings.append({
@@ -79,3 +87,13 @@ class LiveGuardianSource:
         return {"transaction_id": self.order["transaction_id"],
                 "submitted_theory": asdict(self.theory), "signals": asdict(self.signals),
                 "holdings": self.holdings}
+
+    def check_strategy(self, order, quantity):
+        # Reuse pure calculation rules, never trader data or trader decisions.
+        bounds = decision_bounds(self.theory, self.signals, self.current_policy,
+                                 self.current_portfolio, order["symbol"])
+        if order["action"] not in bounds["allowed_actions"]:
+            raise ValidationError("Independent signals do not justify this action", "strategy_action")
+        maximum = bounds["max_buy_quantity"] if order["action"] == "BUY" else bounds["max_sell_quantity"]
+        if quantity > maximum:
+            raise ValidationError("Independent strategy quantity bound exceeded", "strategy_quantity")

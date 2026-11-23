@@ -22,6 +22,21 @@ def review(decision, reason, quantity=None):
     return {"decision": decision, "reason": reason, "quantity": quantity}
 
 
+
+# Only these local labels may appear in diagnostics; never echo exception text.
+HARD_RULES = frozenset({
+    "invalid_input", "transaction_ceiling", "currency_permission", "restricted_action",
+    "insufficient_cash", "position_fraction", "insufficient_holdings", "minimum_amount",
+    "quote_currency", "max_trades_per_hour", "max_trades_per_day",
+    "strategy_action", "strategy_quantity",
+})
+
+
+def blocked_check(error, phase):
+    rule = error.rule if error.rule in HARD_RULES else "invalid_input"
+    return review("BLOCK", f"{phase} hard-rule check failed: {rule}.")
+
+
 def threshold_reached(checked, policy):
     amount = max(checked.exact_amount, checked.settled_amount)
     threshold = number(policy["escalation_threshold"])
@@ -76,8 +91,10 @@ def review_next(source, model):
         data = evidence(source, order["symbol"])
         try:
             checked = validate_order(order, **data)
-        except ValidationError:
-            return review("BLOCK", "Independent hard-rule check failed.")
+            if hasattr(source, "check_strategy"):
+                source.check_strategy(order, checked.quantity)
+        except ValidationError as error:
+            return blocked_check(error, "Initial")
         if threshold_reached(checked, data["policy"]):
             return review("ESCALATE", "Order meets the escalation threshold.")
         # 3. Ask the Guardian model. Send quantity as text to preserve precision.
@@ -95,8 +112,10 @@ def review_next(source, model):
         final_order = dict(order, quantity=quantity)
         try:
             final = validate_order(final_order, **fresh)
-        except ValidationError:
-            return review("BLOCK", "Fresh evidence failed the final hard-rule check.")
+            if hasattr(source, "check_strategy"):
+                source.check_strategy(final_order, final.quantity)
+        except ValidationError as error:
+            return blocked_check(error, "Final")
         if threshold_reached(final, fresh["policy"]):
             return review("ESCALATE", "Fresh amount meets the escalation threshold.")
         return review(decision, "Independent checks and final recheck passed.", final.quantity)

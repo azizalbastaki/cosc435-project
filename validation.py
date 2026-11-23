@@ -12,7 +12,11 @@ CENT = Decimal("0.01")
 
 
 class ValidationError(ValueError):
-    """A local rejection; messages never echo supplied input."""
+    """A local rejection with an optional stable, safe rule name."""
+
+    def __init__(self, message, rule="invalid_input"):
+        super().__init__(message)
+        self.rule = rule
 
 
 @dataclass(frozen=True)
@@ -118,17 +122,17 @@ def _validate(order, policy, portfolio, quote, selected_symbols, position_fracti
 
     # 4. Calculate the exact value and the amount Ledger would settle.
     if quote["symbol"] != symbol:
-        raise ValidationError("Quote does not match the order currency")
+        raise ValidationError("Quote does not match the order currency", "quote_currency")
     price = number(quote["price"])
     if price <= 0:
         raise ValidationError("Price must be positive")
     exact = quantity * price
     settled = cash_amount(quantity, price, action)
     if settled < CENT:
-        raise ValidationError("Order must settle to at least one cent")
+        raise ValidationError("Order must settle to at least one cent", "minimum_amount")
     cap = number(policy["max_transaction_amount"])
     if max(exact, settled) > cap:
-        raise ValidationError("Order exceeds the policy transaction ceiling")
+        raise ValidationError("Order exceeds the policy transaction ceiling", "transaction_ceiling")
 
     # 5. A BUY needs cash; a SELL needs owned currency.
     if action == "BUY":
@@ -145,9 +149,9 @@ def check_permissions(symbol, action, policy, selected_symbols):
         raise ValidationError("Invalid selected currencies")
     allowed = normalize_list(policy["allowed_symbols"])
     if symbol not in SYMBOLS or symbol not in selected or symbol not in allowed:
-        raise ValidationError("Currency must be supported and selected by both strategy and policy")
+        raise ValidationError("Currency must be supported and selected by both strategy and policy", "currency_permission")
     if action in normalize_list(policy["restricted_actions"]):
-        raise ValidationError("Action is restricted by policy")
+        raise ValidationError("Action is restricted by policy", "restricted_action")
 
 
 def check_trade_quotas(policy):
@@ -161,7 +165,7 @@ def check_trade_quotas(policy):
         if type(count) is not int or type(limit) is not int or min(count, limit) < 0:
             raise ValidationError("Trade counts and limits must be nonnegative integers")
         if count >= limit:
-            raise ValidationError("Executed trade quota is exhausted")
+            raise ValidationError("Executed trade quota is exhausted", limit_name)
 
 
 def check_buy_balance(cost, portfolio, position_fraction):
@@ -170,9 +174,9 @@ def check_buy_balance(cost, portfolio, position_fraction):
     if not Decimal("0.001") <= fraction <= 1 or fraction.as_tuple().exponent < -4:
         raise ValidationError("Position fraction must be 0.001 to 1 with at most four decimals")
     if cost > cash:
-        raise ValidationError("Insufficient cash")
+        raise ValidationError("Insufficient cash", "insufficient_cash")
     if cost > cash * fraction:
-        raise ValidationError("Order exceeds the per-buy cash fraction")
+        raise ValidationError("Order exceeds the per-buy cash fraction", "position_fraction")
 
 
 def check_sell_balance(symbol, quantity, portfolio):
@@ -191,4 +195,4 @@ def check_sell_balance(symbol, quantity, portfolio):
         found = True
 
     if quantity > owned:
-        raise ValidationError("Insufficient currency holdings")
+        raise ValidationError("Insufficient currency holdings", "insufficient_holdings")

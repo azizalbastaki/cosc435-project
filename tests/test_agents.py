@@ -6,6 +6,7 @@ from guardian import review_next
 from model_adapter import ModelError
 from offline_demo import FixtureSource, ScriptedModel
 from trader import decide
+from validation import ValidationError
 
 
 class AgentTests(unittest.TestCase):
@@ -39,6 +40,32 @@ class AgentTests(unittest.TestCase):
             model = ScriptedModel(self.approve)
             self.assertEqual(review_next(source, model)["decision"], "BLOCK")
             self.assertEqual(model.calls, 0)
+
+    def test_block_reason_names_rule_without_echoing_input(self):
+        source = FixtureSource([self.order | {"requested_quantity": 10,
+                                             "reasoning": "PRIVATE INPUT"}])
+        result = review_next(source, self.model)
+        self.assertEqual(result["reason"],
+                         "Initial hard-rule check failed: transaction_ceiling.")
+        self.assertEqual(self.model.calls, 0)
+
+        for rule in ("strategy_action", "strategy_quantity", "PRIVATE INPUT"):
+            source = FixtureSource([self.order])
+            source.check_strategy = Mock(side_effect=ValidationError("PRIVATE INPUT", rule))
+            result = review_next(source, self.model)
+            expected = rule if rule.startswith("strategy_") else "invalid_input"
+            self.assertEqual(result["reason"], f"Initial hard-rule check failed: {expected}.")
+            self.assertNotIn("PRIVATE INPUT", str(result))
+
+    def test_final_block_names_rule_and_phase(self):
+        model = Mock()
+        def change(*args):
+            self.source.data["policy"]["max_transaction_amount"] = 100
+            return self.approve
+        model.generate.side_effect = change
+        result = review_next(self.source, model)
+        self.assertEqual(result["reason"],
+                         "Final hard-rule check failed: transaction_ceiling.")
 
     def test_guardian_ignores_trader_estimate_and_validation_claim(self):
         order = self.order | {"requested_quantity": 10, "estimated_total": 1, "validated": True,

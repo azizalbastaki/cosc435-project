@@ -13,7 +13,7 @@ def main():
     order = ValidatedOrder("ETH", "BUY", Decimal("0.1"), "Test only",
                            Decimal("320"), Decimal("320.00"))
     with TemporaryDirectory() as folder:
-        path = Path(folder) / "journal.sqlite3"
+        path = Path(folder) / "journal.json"
         journal = ProposalJournal(path)
         intent = journal.reserve(order, theory_id=7, theory_version=1)
         journal.mark_attempt(intent)

@@ -1,586 +1,225 @@
 # COSC 435 AI Security Engineering
 
-## Recovery journal (offline safety building block)
+Two agents work with the course's simulated Ledger account:
 
-```sh
-.venv/bin/python recovery_demo.py
-.venv/bin/python -m unittest discover -s tests -v
-```
+1. The **trader** reads its submitted theory and market/account data, asks Muse for
+   a candidate, and checks the candidate locally.
+2. The **Guardian** reads the pending order directly from Ledger, gathers its own
+   evidence, applies hard rules, asks Muse, and repeats the checks before review.
 
-The demo simulates a lost proposal response and a restart. It uses a temporary
-SQLite journal and proves that a second proposal is refused. It makes no network
-requests and does not touch your account or real pending orders.
+The Guardian does not trust the trader's estimates or validation result. Both
+agents use the same pure calculation functions with their own evidence.
 
-`recovery.py` provides a `ProposalJournal` for a future write-enabled trader:
+## Setup
 
-1. `reserve(order, theory_id, theory_version)` saves a validated BUY/SELL intent.
-2. `mark_attempt(intent_id)` commits UNCERTAIN **before** sending any HTTP request.
-3. A received proposal reply can be recorded as PENDING or REJECTED.
-4. PENDING and ESCALATED remain unresolved. A matching terminal history record
-   (EXECUTED with a positive fill, BLOCKED, or REJECTED) releases the proposal gate.
-
-Only an unsent PLANNED intent may be cancelled. An UNCERTAIN attempt cannot be
-resent. If the transaction ID was lost, the journal refuses to infer it from a
-similar-looking history row: deliberate investigation and a future explicit
-resolution workflow are required. It never guesses that an absent record means
-the write failed. Reconciliation checks known transaction identity, symbol,
-action, theory identity/version, requested quantity, and positive execution fields.
-
-SQLite commits preserve state across restarts, and a unique index prevents two
-processes sharing the same journal from reserving simultaneous open proposals.
-Use one stable journal per Ledger account, for example
-`.ledger-state/my-account.sqlite3`. That directory is Git-ignored; databases use
-owner-only file permissions. The journal stores selected order numbers and
-states, not keys, configuration, theory prose, or model reasoning. It is not a
-complete execution audit log or theory snapshot store.
-
-This module is **not wired to live submission**: POST remains disabled and the
-existing dry runs do not reserve journal entries. Future work must add reads of
-Ledger history/pending state, account binding, explicit uncertain-ID resolution,
-Guardian review recovery, and submission integration. A journal cannot detect
-orders created by other clients/devices, and deleting it is not reconciliation.
-The helper must be used on every future write path for its protection to apply.
-
-AI assistance (2026-11-23): Codex implemented the local journal and tests for
-restart safety, competing connections, invalid acknowledgements/history, terminal
-state handling, and credential-free stored fields. Based on the guide's
-Section 6.2 uncertain-write rule and Section 7.4 recovery requirements.
-
-## Guardian dry run with live evidence and Muse
-
-Create the separate role config if it does not exist, then edit it locally:
-
-```sh
-cp -n config.guardian.example.json config.guardian.json
-chmod 600 config.guardian.json
-```
-
-Set `GUARDIAN_API_KEY` to the guardian-scoped Ledger key and fill the four Muse
-settings. The Meta key may be the same provider key as the trader's, but never
-put `TRADER_API_KEY` in the Guardian config. Both example files must stay placeholders.
-The guardian config remains Git-ignored. Existing two-field guardian configs still
-work for the observer command; add Muse settings before model reviews.
-
-```sh
-source .venv/bin/activate
-python guardian_dry_run.py --config config.guardian.json
-python -m unittest discover -s tests -v
-```
-
-`guardian_live.py` supplies the existing Guardian review function with real data:
-one pending order, independently read policy/portfolio, a replay-verified quote
-and signals, and a submitted theory matching the order's **ID and version**.
-No trader program or trader-local validation result is consulted. The model sees
-only selected evidence; all prose stays untrusted. Approved/modified outcomes
-must pass another policy/portfolio/theory/quote read and final hard-rule checks.
-The model adapter now accepts a guardian role config and excludes that role key
-from prompts just as it excludes the trader key.
-
-If the latest theory differs from the pending order's version, the dry run returns
-local ESCALATE rather than applying the wrong strategy. Historical theory snapshot
-storage is not implemented yet. Custom strategies also escalate pending explicit
-rule implementation. Missing evidence, replay mismatch, or model failure escalates
-locally; Ledger cooldown stops and leaves the order pending. An empty queue prints
-NO_PENDING and never initializes Muse. Do not create trades just to test this.
-
-This command may make one billable Muse call, sending selected simulated-account
-and theory data to Meta. It makes none when the queue is empty or hard rules block
-the order first. It never submits an APPROVE/MODIFY/BLOCK/ESCALATE to Ledger, even
-when the printed local outcome is APPROVE. Output excludes raw model reasoning,
-theory prose, news, credentials, and request headers. Exit 0 means a local result
-was produced (including ESCALATE), 1 means startup/config failure, 2 means cooldown.
-
-Before live review submission, persistent recovery, theory snapshots, pending-order
-state rechecks, and a deliberate write milestone are still required. No new Ledger
-endpoints or write permissions were added here.
-AI assistance (2026-11-23): Codex connected the live Guardian source and Muse role
-configuration and tested independent evidence, theory-version changes, refreshed
-prices, model failure, cooldown, and empty-queue behavior with mocks.
-
-## Trader dry run with live data and Muse
-
-```sh
-source .venv/bin/activate
-python trader_dry_run.py --config config.json --symbol ETH
-```
-
-This command reads your submitted theory, policy, portfolio, relevant news, and
-replay-verified quote/signals. It sends selected evidence (including your theory
-text and simulated account balances) to **Meta Muse** for one billable model
-decision. Ledger/provider keys stay out of prompts. It prints only the validated
-action, quantity, theory identity, and quote—not raw model reasoning or news.
-No proposal, HOLD entry, or review is submitted to Ledger.
-
-The flow in `trader_dry_run.py` has four steps: gather evidence, replay-check the
-quote, ask Muse, then validate its answer. Momentum and mean-reversion directions
-are checked locally. Stop-loss/take-profit exits have priority; buys are bounded
-by cash fraction and policy ceiling, sells by owned units and policy ceiling.
-HOLD is always an option. Existing policy/quota/funds/quantity rules apply after
-the model call, and the model cannot enlarge the computed quantity bounds.
-Custom strategies HOLD until their written rules are explicitly implemented.
-The signal-only tolerance is 1e-12 percentage points; no tolerance relaxes money
-or policy limits. News trust flags are metadata, not permission to follow news
-instructions. Unexpected/oversized news data fails closed.
-
-Exit 0 means the model returned a valid local candidate (including HOLD), 1 means
-a local HOLD due to missing/invalid evidence or model output, and 2 means Ledger
-cooldown. This is a snapshot analysis, not execution authorization. No pending
-order reconciliation or post-model live quote refresh is attempted here because
-there is no write path. Those are required before enabling proposals. The
-offline demo and live Guardian observer remain separate commands.
-
-Test with `python -m unittest discover -s tests -v`. Mocked tests cover payload
-field selection, news injection remaining data, direction/size checks, risk-exit
-priority, model failures, replay failures, and resource cleanup. The only new
-Ledger endpoint is GET `market_news.php`; all POST requests stay disabled.
-AI assistance (2026-11-23): Codex implemented and tested this one-shot dry run.
-
-## Market replay and signals
-
-```sh
-source .venv/bin/activate
-python market_check.py --config config.json --symbol ETH
-python -m unittest discover -s tests -v
-```
-
-`market.py` follows the Student Development Guide Appendix A reference formula:
-tick-aligned power-law trend, periodic waves, two integer noise steps, price
-clamping, and eight-decimal half-up rounding. `market_check.py` reads the member's
-validated theory, a current quote, and `market_model.php`, then rebuilds 61 evenly
-spaced prices over the theory's lookback. It reports lookback return and mean
-deviation. Momentum uses return; mean reversion uses negative mean deviation.
-Custom strategies get both measurements but no invented trading signal.
-
-The replayed final price must agree with the quote within $0.00000001. A model
-version or price mismatch refreshes the descriptor once, then raises a local HOLD
-if still inconsistent. `MarketReader` caches descriptors for five minutes when
-reused across cycles. It also refuses quotes ahead of the server clock or more
-than two ticks behind it. Cooldown exits with code 2; other invalid evidence exits
-with code 1. Neither causes an order or model call.
-
-Live samples are bounded by the quote timestamp, not a cached `replay_end_unix`.
-Insufficient history causes HOLD. `price_at(..., quote_time=...)` enforces the
-upper bound; omitting it is reserved for standalone synthetic formula tests.
-Published day-365 fixtures are tests only and never feed a live signal.
-
-The selected public BTC/ETH formula parameters in
-`tests/fixtures/market_model.json` were fetched on 2026-11-23. They contain no
-credentials or portfolio data and reproduce the guide's published day 0/30/365
-BTC quote fixtures and day 0/365 trend fixtures. Live code always fetches the
-descriptor, never loads this test fixture. Tests additionally cover cache refresh,
-version mismatch, insufficient history, timestamp boundaries, invalid parameters,
-and hand-calculated signals. Formula arithmetic preserves the reference floating-
-point operation order; percentage calculations use Decimal on replayed prices.
-
-This command provides evidence, not BUY/SELL decisions. Stop-loss/take-profit
-evaluation, order sizing, news/model integration, and live agent execution are
-still separate steps. The public deterministic generator can compute future
-prices; simulator profit does not establish real-world forecasting skill.
-
-AI assistance (2026-11-23): Codex adapted the Appendix A formula, implemented
-read-only replay/signal checking, and added offline tests. The client now permits
-the market-model GET; all POST operations remain disabled.
-
-## Submitted theory check
-
-Read your existing submitted theory with the trader key and check its policy
-eligibility. Each teammate uses their own config and assigned currency:
-
-```sh
-source .venv/bin/activate
-python theory_check.py --config config.json --symbol ETH
-python -m unittest discover -s tests -v
-```
-
-`theory.py` validates the response from `theory.php`: SUBMITTED status, positive
-integer ID/version, lookback of 1–1440 minutes, supported strategy and currencies,
-required nonempty text without NUL, UTF-8 byte limits, and numeric ranges with at
-most four decimal places. Booleans, strings used as numbers, NaN, and infinity
-are rejected. Values are stored in an immutable Theory object with Decimal
-settings; prose is retained as untrusted data and excluded from its repr.
-
-The API validator accepts one to six distinct currencies. The member-specific
-`read_theory` check additionally requires exactly the assigned currency, as the
-course requires, and checks `policies.php` for permission. It does not alter
-your theory or policy. Other server metadata is ignored; created_at is not used
-for decision-making. The summary prints only validated identity/settings.
-
-Exit 0 means this check passed; exit 1 prints a local HOLD for invalid/missing
-theory, policy, configuration, or API failure; exit 2 is a cooldown. No HOLD or
-trade is sent to Ledger. Passing does not establish profitability or authorize
-trading. The offline demo still uses fixtures; wiring theory into a live trader,
-market replay/signals, and version snapshots for pending-order reviews remain
-later work. Never assume the latest theory matches an older pending order.
-
-The read-only client now permits `theory.php` for either role, as documented by
-Ledger; all POST requests remain disabled. No other endpoints were added.
-Reference: Student Development Guide Sections 5.1/6.3 and Appendix B.
-AI assistance (2026-11-23): Codex implemented theory parsing, the read-only command,
-and mocked boundary/field/eligibility tests. Existing smoke tests were updated
-to reflect the newly allowed theory GET.
-
-## How to read the code
-
-Start with the agent flow, then follow the helpers as needed:
-
-| Read in this order | What to look for |
-| --- | --- |
-| `trader.py` → `decide()` | Read evidence → ask the model → validate → return a candidate or HOLD. |
-| `guardian.py` → `review_next()` | Read pending order → independent checks → model review → fresh checks. |
-| `validation.py` → `_validate()` | Five numbered stages; named helpers check permissions, quotas, cash, and holdings. |
-| `offline_demo.py` → `run_demo()` | Connects the two agents through an in-memory queue. |
-| `agent_contracts.py` | Expected model JSON fields and evidence selection/validation. |
-| `model_adapter.py` | The actual Muse HTTP call and response validation. |
-
-Live read-only tools are separate: `smoke_test.py` reads the trader's account;
-`guardian_check.py` uses `guardian_source.py` to inspect pending orders. Both use
-`client.py` for HTTP and `configuration.py` to read private settings.
-
-Two Python details used in the code:
-
-- `validate_order(order, **data)` passes the entries of the `data` dictionary as
-  named arguments (`policy=...`, `portfolio=...`, and so on).
-- `raise ValidationError(...)` stops a check. The caller's `except` block handles
-  it as HOLD, BLOCK, or ESCALATE according to the stage that failed.
-
-The functions return data; they do not automatically submit trades. The longer
-milestone notes below explain what each part can currently do.
-
-Readability pass (2026-11-22, with Codex assistance): expanded dense expressions,
-added numbered agent/validation stages, separated balance and evidence checks,
-and removed a redundant wrapper. Existing safety behavior is covered by tests.
-
-## Milestone 5: Guardian reads directly from Ledger
-
-`guardian_source.py` adds read-only pending-order evidence collection.
-`guardian_check.py` is the one-shot command. It uses a separate guardian config,
-GETs `trade_pending.php?limit=2`, and independently GETs policy, portfolio, and
-the relevant market price for each pending order. Embedded queue context, trader
-price estimates, and reasoning are not used as evidence or printed. `has_more`
-is reported but never followed automatically. An empty queue is successful.
-
-Create a separate ignored file (do not overwrite an existing one):
-
-```sh
-cp -n config.guardian.example.json config.guardian.json
-chmod 600 config.guardian.json
-```
-
-Edit **config.guardian.json**, replacing its placeholder with the complete
-guardian-scoped Ledger key. The example must remain placeholders only. Do not
-put the trader key in this file; either role loader rejects the other role's key.
-The client role restricts endpoints locally; Ledger checks the actual key scope.
-A full key may still pass server reads, so verify the scope in the dashboard.
-
-```sh
-python guardian_check.py --config config.guardian.json
-python -m unittest discover -s tests -v
-git check-ignore config.guardian.json
-```
-
-This prints a small validated summary, leaves every order pending, and submits
-no reviews. It does not call Muse. Exit codes: 0 success, 1 invalid configuration
-or API/response failure, 2 cooldown (wait the reported time before rerunning).
-An invalid pending row stops the batch; this observer does not decide its fate.
-Do not create orders merely to populate the queue for this check.
-
-Live review decisions are not connected yet: we still need theory/version
-provenance, full evidence validation, fresh rechecks, and recovery handling before
-enabling review submission. `guardian_source.py` is an observational collector,
-not a drop-in live replacement for the offline fixture strategy source.
-The existing trader client remains limited to its original three GET endpoints;
-only a guardian client can now GET pending orders. POST remains disabled for both.
-
-AI assistance (2026-11-22): Codex added the read-only Guardian collector, role
-config isolation, command, and mocked tests. AGENTS.md now reflects this expanded
-read-only milestone. Only the placeholder guardian example is exempted from Git
-ignore; real role configuration remains ignored.
-
-## Milestone 4: offline Trader and Guardian flow
-
-The Guardian reads from Ledger, not from the trader. This milestone models that
-boundary using a simulated queue and separate fixture evidence sources:
-
-```text
-Trader reads evidence -> model candidate -> local validation
-                                  |
-                         simulated Ledger queue
-                                  |
-Guardian reads pending order + its own policy/portfolio/quote/strategy
-    -> hard rules -> model review -> fresh evidence + final hard rules
-```
-
-`trader.py` and `guardian.py` now implement those offline cycles.
-`agent_contracts.py` defines their separate prompts' JSON contracts and selects
-the evidence fields allowed into model payloads. `offline_demo.py` supplies the
-fake Ledger and test models. No agent can call a Ledger write endpoint here.
-
-Run the deterministic demo (no credentials or network):
-
-```sh
-python offline_demo.py
-python offline_demo.py --scenario oversized
-python offline_demo.py --scenario unsupported-sale
-python -m unittest discover -s tests -v
-```
-
-Expected outcomes: the normal scripted trader's 0.1 ETH BUY is APPROVE; the
-10 ETH BUY and the 0.3 ETH SELL with only 0.2 ETH owned are BLOCK. Attack cases
-deliberately inject a pending order past trader validation to prove the Guardian
-does its own checks. They do not use the real Ledger Attack Simulator. A demo
-APPROVE is a local result only: it creates no fill and changes no balances.
-
-To use actual Muse decisions with the same synthetic Ledger data, explicitly run:
-
-```sh
-python offline_demo.py --live-model --config config.json
-```
-
-This makes up to two billable model requests, with different role prompts and
-fresh model messages for each role. It does not share trader conversation history
-with the Guardian. A trader HOLD leaves the queue empty; a Guardian hard-rule
-failure skips its model call. Live-model outcomes are not deterministic. The
-default scripted mode is only a test double, not evidence of actual LLM use.
-
-The Guardian ignores claimed trader validation, requested prices, and estimated
-amounts. It independently calculates amounts, checks policy/quotas/funds/holdings,
-and escalates at or above the configured threshold. MODIFY must strictly decrease
-quantity. APPROVE/MODIFY trigger another read of policy, portfolio, quote, and
-strategy before the final check. Model faults or missing evidence produce a local
-ESCALATE; trader model/validation faults produce a local HOLD. Raw model reasoning
-and full source replies are not printed by the demo.
-
-These are testable agent building blocks, not the completed live system. The
-fixture strategy is not a submitted theory; active-theory validation and matching
-version snapshots, replay/signals/news, persisted proposal/review recovery,
-separate live role credentials, polling/cooldown handling, and live transport
-remain to be implemented. In a later live milestone, the Guardian will use its
-guardian-scoped key to GET `trade_pending.php`, `policies.php`, `portfolio.php`,
-and `market_prices.php` directly from Ledger, then submit its review only after
-the final recheck. No new live endpoints are enabled in this milestone.
-
-AI assistance (2026-11-22): Codex implemented the separate offline agent cycles,
-simulated queue, independent evidence reads, and tests for attacks and evidence
-changing while the model reviews an order.
-
-## Milestone 3: Muse model adapter
-
-`model_adapter.py` provides `MuseAdapter.generate(system_prompt, payload, schema)`.
-It calls Meta's model API, then validates the JSON response locally. This is the
-shared model transport for the trader and Guardian. Their offline decision cycles
-are described above; live Ledger integration is still pending.
-
-The ignored `config.json` may now include the four Muse fields shown in
-`config.example.json`: `LLM_PROVIDER` (`meta_muse`), `META_BASE_URL`
-(`https://api.meta.ai/v1`), `MUSE_MODEL` (`muse-spark-1.3`), and `META_API_KEY`.
-Keep your real values only in local config. Do not overwrite an existing private
-config with the template. Ledger-only configs still work for the Ledger check.
-`configuration.py` accepts only known string fields and rejects duplicate names;
-the Ledger loader returns only its own two settings. Guardian credentials will
-use a separate role config in a later step.
-
-```sh
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
-```
-
-To explicitly make **one billable model request** with fixed synthetic data:
-
-```sh
-python model_smoke_test.py --config config.json
-```
-
-Success prints only that the structured response validated. No Ledger requests,
-portfolio data, trading proposals, or reviews are involved. Exit 1 means config,
-provider access, or response validation failed. The program does not retry.
-
-The adapter follows Appendix C's Meta example, using the OpenAI-compatible SDK
-with Meta's base URL (the request goes to Meta, not OpenAI). It requests a strict
-JSON schema, uses a 30-second timeout and zero SDK retries, disables redirects
-and ambient proxies, and rejects refusals, truncated output, malformed JSON,
-duplicate fields, non-finite numbers, and schema mismatches. Errors never echo
-provider bodies. It also restricts the destination to Meta and rejects known
-configured secrets or credential-like payload field names before sending.
-These checks do not replace constructing prompts from explicitly selected data;
-never pass configuration or headers as model input. The key is used only for
-HTTP authentication. Ledger keys never belong in model messages.
-
-The calling trader must HOLD on `ModelError`; the future Guardian must ESCALATE
-when Ledger is available, or leave the order pending during Ledger cooldown.
-Schema validation is only a format check; local order/Guardian rules still apply.
-
-Reference: [Meta structured output documentation](https://dev.meta.ai/docs/structured-output).
-AI assistance (2026-11-22): Codex added the adapter, separate model connection
-check, shared config parsing, and mocked failure/credential-isolation tests.
-
-## Milestone 2: offline local order validation
-
-`validation.py` now provides `validate_order`, a pure function for checking a
-trader candidate against supplied policy, portfolio, quote, selected currencies,
-and per-buy position fraction. It makes no HTTP requests and reads no keys.
-The smoke test below remains unchanged; no trading loop is connected yet.
-
-The candidate must contain exactly `symbol`, `action`, `quantity`, and `reasoning`.
-BUY/SELL checks cover currency eligibility, restricted actions, executed hourly
-and daily quotas, positive finite quantities, the transaction ceiling, available
-cash/per-buy cash fraction, and owned SELL quantity. Missing holdings mean zero.
-HOLD requires zero quantity and a nonempty explanation, then returns locally
-without requiring trading context. A bad candidate raises `ValidationError`;
-a later trader loop should handle that as a local HOLD, never submit it.
-
-Example, entirely offline (run in Python from the repository root):
-
-```python
-from validation import validate_order
-
-checked = validate_order(
-    {"symbol": "ETH", "action": "BUY", "quantity": 0.1,
-     "reasoning": "Illustrative candidate for testing only."},
-    policy={"allowed_symbols": ["ETH"], "restricted_actions": ["WITHDRAW"],
-            "max_transaction_amount": 1000, "max_trades_per_hour": 10,
-            "max_trades_per_day": 50, "trades_last_hour": 0, "trades_last_day": 0},
-    portfolio={"cash_balance": 10000, "holdings": []},
-    quote={"symbol": "ETH", "price": 3200},
-    selected_symbols=["ETH"], position_fraction=0.05,
-)
-print(checked.action, checked.quantity, checked.settled_amount)
-# BUY 0.1 320.00 — nothing is submitted.
-```
-
-Run just these tests, or the complete suite:
-
-```sh
-python -m unittest discover -s tests -p 'test_validation.py' -v
-python -m unittest discover -s tests -v
-git diff --check
-```
-
-Money helpers adapt Section 6.3 of the Student Development Guide: BUY settlement
-rounds up, SELL settlement rounds down, and policy checks compare the larger of
-the exact and settled amounts against the ceiling. `bounded_quantity` rounds
-budget down to cents and quantity down to ten decimals. The helpers add strict
-numeric checks, explicit BUY/SELL action checks, and a local 80-digit Decimal
-context so ambient precision cannot alter the calculation. Policy lists accept
-arrays or comma-separated text. Numeric strings and booleans are rejected;
-internal Decimal values are accepted alongside JSON integers/floats. For this
-milestone, supplied amounts/prices also conservatively use the quantity bounds
-(below 10^18, at most ten fractional places). No tolerance relaxes money limits.
-
-This is a building block, not complete theory validation or permission to trade.
-Before live proposals, the caller must validate an active submitted theory,
-supply its selected symbols and position fraction, attach its id/version, verify
-fresh market evidence and strategy compliance, and handle pending/uncertain
-orders. Quote freshness and those theory checks are not implemented here.
-The Guardian must independently fetch and check evidence later; the trader's
-successful validation is not Guardian approval. No new API endpoints were added.
-
-AI assistance (2026-11-22): Codex implemented and tested these offline checks
-using guide Sections 6.3–6.5. Include team review and this assistance in the final
-report disclosure. Review `validation.py`, `tests/test_validation.py`, and this
-section before committing this milestone.
-
-## Milestone 1: connection check
-
-Milestone 1: a one-shot, read-only Ledger smoke test. It reads the portfolio,
-security policy, and selected currency's market price with one trader client.
-It needs no active theory and sends no orders, reviews, or HOLD entries.
-The original trader.py and guardian.py scaffolds now host the offline cycles
-described above; market.py remains empty for the replay milestone.
-
-## Setup and run
-
-Use Python 3.10 or newer. From the repository root:
+Use Python 3.10+ on macOS/Linux. From this repository:
 
 ```sh
 python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp config.example.json config.json
-chmod 600 config.json
+.venv/bin/python -m pip install -r requirements.txt
+cp -n config.example.json config.json
+cp -n config.guardian.example.json config.guardian.json
+chmod 600 config.json config.guardian.json
 ```
 
-Edit `config.json` locally. Copy the HTTPS API base URL from Ledger's API Keys
-page and replace the placeholder with your complete **trader-scoped** key.
-Do not use a guardian or full key. The GET endpoints do not prove the scope of
-an otherwise valid key; verify its scope in the dashboard. Never paste the key
-into chat, command-line arguments, screenshots, or source control.
+Edit the **local** files, not the examples:
+
+- `config.json`: trader-scoped Ledger key and Muse settings.
+- `config.guardian.json`: guardian-scoped Ledger key and Muse settings.
+- The Meta provider key can be shared by both agents; their Ledger keys must be
+  separate. Never use Ledger's `full` scope.
+
+Examples contain placeholders and can be committed. Real config files, `.venv/`,
+`.ledger-state/`, and the local course PDFs in `docs/` are Git-ignored.
+Never share keys in chat, screenshots, model prompts, or source control.
+
+Use `.venv/bin/python` in the commands below. A `jsonschema` import error usually
+means you used a different Python interpreter.
+
+## Run one cycle
+
+Start with the default **dry run**. It reads Ledger and makes a billable Muse
+request but submits nothing:
 
 ```sh
-python smoke_test.py --config config.json --symbol ETH
+.venv/bin/python trade_once.py --symbol ETH
 ```
 
-ETH is the default. Teammates can select BTC, ETH, DOGE, XMR, XRP, or SOL
-(case-insensitive). Each teammate uses their own local configuration and key.
-For example: `python smoke_test.py --config config.local.json --symbol SOL`.
-Keep private files named `config.json` or `config.<name>.json` in this repo so
-the ignore rules cover them; only `config.example.json` is committed.
-
-The summary shows cash, total portfolio value, selected holdings and quote,
-policy eligibility, transaction ceiling, executed trade counts/limits, escalation
-threshold, and restricted-action count. An unowned currency has zero holdings;
-a policy-disallowed currency is reported as such and is still safe to read.
-Missing/malformed quote data fails the check. Values are snapshots, not proof
-that a future trade is permitted. No active theory is fetched or required.
-
-Exit codes: 0 = three reads and summary validated; 1 = configuration, transport,
-API, or response validation failure; 2 = cooldown. For 429/503, wait at least
-the reported duration before rerunning. The client blocks further requests for
-that cooldown. A new process has no persisted timer, so honor the printed wait.
-401 means check the full original token; 403 means check the required scope.
-
-## Offline verification
+To explicitly allow **at most one simulated Ledger proposal and Guardian review**:
 
 ```sh
-python -m unittest discover -s tests -v
+.venv/bin/python trade_once.py --symbol ETH --submit
+```
+
+This can change your simulated portfolio. It still returns HOLD if the theory
+or safety checks do not justify an order. There is no automatic loop.
+Teammates use their own accounts/config files and substitute their assigned symbol:
+BTC, ETH, DOGE, XMR, XRP, or SOL.
+
+The submission flow checks existing pending/escalated work, verifies the two keys
+see the same submitted theory, obtains a trader decision, refreshes the evidence,
+records the intent, and submits once. The Guardian independently checks that exact
+transaction and refreshes its evidence before review. The final result comes from
+Ledger history; an APPROVE decision alone does not prove a fill occurred.
+
+## Simple recovery file
+
+State is readable JSON at **`.ledger-state/trader.json`**. Each entry records the
+currency, action, quantity, theory ID/version, transaction ID, and state. It does
+not store keys, model reasoning, or theory prose.
+
+```text
+PLANNED -> UNCERTAIN -> PENDING -> EXECUTED / BLOCKED / REJECTED
+                            -> ESCALATED (still unresolved)
+```
+
+- Save the intent before sending. Mark UNCERTAIN immediately before the request.
+- A lost response must not cause a second order. Unresolved work blocks proposals,
+  including after restart. An unsent PLANNED intent can be cancelled locally.
+- A saved transaction ID lets the program check Ledger history for the outcome.
+- If the ID was lost, or a review was attempted but remains pending, stop and
+  investigate. The program does not guess or blindly resend.
+
+Check history without model calls or writes:
+
+```sh
+.venv/bin/python trade_once.py --reconcile-only
+```
+
+Keep the same journal for an account. A stored credential fingerprint prevents
+accidentally reusing it with another key/account; key rotation needs deliberate
+migration after resolving old work. Deleting state is not reconciliation.
+
+Saving uses an owner-only temporary file and atomic replacement. A small `.lock`
+file prevents two local runs at once; the OS releases the lock when a run exits.
+Malformed state stops the program rather than being treated as empty. An existing
+SQLite journal is not silently replaced: it requires deliberate migration. No
+SQLite journal existed locally when this project switched to JSON.
+
+Offline restart/lost-response demo:
+
+```sh
+.venv/bin/python recovery_demo.py
+```
+
+## Other useful commands
+
+| Command (after `.venv/bin/python`) | What it does |
+| --- | --- |
+| `smoke_test.py --symbol ETH` | Reads portfolio, policy, and price. |
+| `theory_check.py --symbol ETH` | Checks submitted theory and policy eligibility. |
+| `market_check.py --symbol ETH` | Reconstructs 61 prices and checks replay against the current quote. |
+| `model_smoke_test.py` | One small billable Muse connection test; no Ledger calls. |
+| `trader_dry_run.py --symbol ETH` | Live trader analysis without submission. |
+| `guardian_check.py` | Reads up to two pending orders and their independent evidence. |
+| `guardian_dry_run.py` | Locally reviews one pending order; never submits the review. |
+| `offline_demo.py` | Scripted two-agent demonstration with no network. |
+| `offline_demo.py --scenario oversized` | Injects an oversized order into the fake queue. |
+| `offline_demo.py --scenario unsupported-sale` | Tests selling more than the fake holdings. |
+
+`offline_demo.py --live-model` uses billable Muse calls with synthetic Ledger data.
+An empty live Guardian queue is normal: NO_PENDING requires no model call.
+Live model calls send selected theory text and simulated-account evidence to Meta,
+never Ledger keys. Console summaries exclude raw model reasoning and server bodies.
+
+## Where to read the code
+
+| File | Responsibility |
+| --- | --- |
+| `trade_once.py` | Coordinates one dry-run or explicitly enabled submission cycle. |
+| `trader_dry_run.py` | Live trader evidence, model decision, and local validation. |
+| `guardian.py` | Guardian rules, model review, and final recheck. |
+| `guardian_live.py` | Independent live Guardian evidence and matching theory version. |
+| `strategy.py` | Shared signal directions, stop/take-profit checks, and size bounds. |
+| `validation.py` | Numeric, permission, quota, money, and holdings checks. |
+| `theory.py`, `market.py` | Submitted theory validation and public price replay. |
+| `agent_contracts.py` | Model JSON contracts and selected evidence fields. |
+| `model_adapter.py`, `client.py` | Muse and Ledger HTTP transports. |
+| `configuration.py`, `recovery.py` | Private config loading and persistent JSON state. |
+| `trader.py`, `offline_demo.py` | Small fixture-based demonstration flow. |
+
+## Course rules and implementation choices
+
+The API contract comes from the Student Development Guide, especially Sections
+6.2–6.7, 7.4, and Appendices A–C.
+
+- HTTP follows the guide scaffold: HTTPS, no redirects, X-Api-Key authentication,
+  5/15-second timeouts, 1.1-second spacing, bounded GET transport retries, and shared
+  429/503 cooldowns. POST requires explicit opt-in and the correct role endpoint,
+  a finite JSON object below 32 KiB, and is never automatically retried. Lost,
+  unreadable, or 5xx write responses are uncertain until reconciled.
+- Differences from the scaffold: no raw error bodies, stricter config/URL checks,
+  HTTP-date Retry-After support, disabled ambient proxies/.netrc, and explicit
+  client cleanup. Separate configs reject the other role's Ledger key.
+- Money uses Decimal. BUY settles upward to cents; SELL settles downward. Policy
+  checks use the larger exact/settled amount. MODIFY can only reduce quantity.
+- Theory checks enforce SUBMITTED status, identity/version, bounded settings and
+  text. The member command requires exactly their assigned currency. Text remains
+  untrusted data even when it passes format checks.
+- Replay follows Appendix A's operation order and integer noise. It uses 61 past
+  samples bounded by the quote timestamp, refreshes once on mismatch, then HOLDs.
+  The descriptor is cached for five minutes when a reader is reused. Test fixtures
+  contain selected public BTC/ETH parameters fetched on 2026-11-23, never secrets.
+  Synthetic future-day fixtures are tests only, not live decision evidence.
+- Momentum uses lookback return; mean reversion uses negative mean deviation.
+  A tiny signal-only tolerance never relaxes money limits. Risk exits have priority.
+- Muse replies must pass JSON schema and local rules. Failure produces trader HOLD
+  or local Guardian ESCALATE; Ledger cooldown leaves pending work untouched.
+- Guardian hard-rule blocks name the first failed check and its phase, for example
+  `Initial hard-rule check failed: position_fraction.` or
+  `Final hard-rule check failed: strategy_quantity.` These fixed local labels
+  distinguish cash, policy, quota, and strategy failures without printing supplied
+  inputs or exception text. Existing review reasons carry this diagnostic; old
+  generic block records cannot be diagnosed retroactively. This is a local
+  scaffold adaptation added with Codex assistance, not a new API field.
+- SQLite was an implementation choice, not a course requirement. JSON persistence
+  now provides the required save-before-send and remember-after-restart behavior.
+
+## Testing and current limits
+
+Run the repeatable offline security demonstration:
+
+```sh
+.venv/bin/python security_demo.py
+.venv/bin/python security_demo.py --output security-evidence.json
+```
+
+It checks a valid control plus three scenarios: an oversized order claiming prior
+approval, a sale exceeding owned currency, and a policy limit tightened during
+model review. Each case prints PASS/FAIL and the Guardian's reason; any failure
+returns a nonzero exit code. No configuration or API access is needed. These
+scripted-model results demonstrate local safeguards, not live Muse resistance to
+prompt injection or completed course trading requirements. Codex assisted with
+this demo and its tests; retain that distinction in the course report.
+
+The optional JSON export records the UTC run time, synthetic setup, expected and
+actual decisions/reasons, model-call counts, and which control was evaluated.
+Transaction IDs are null because no Ledger transaction exists. It refuses to
+overwrite a file; choose a new filename for another run. This supports the
+simulation evidence requested in Guide Section 8.2, but does not establish live
+trading results or server-backstop behavior. The file contains only synthetic
+fixtures and can be reviewed and committed as offline evidence.
+
+```sh
+.venv/bin/python -m unittest discover -s tests -v
 git diff --check
-```
-
-Tests mock the HTTP session, clock, and sleeps: no Ledger credentials or network
-are used. They cover the three GETs, ETH/other currencies, absent holdings,
-policy exclusion, invalid configuration, unsafe URLs, write rejection, pacing,
-redirect refusal, HTML/non-object replies, API errors, bounded network retries,
-429/503 cooldowns, and output secrecy. Live connectivity is a separate manual
-check using the command above; mocked success does not establish live access.
-
-## Course scaffold adaptations
-
-`client.py` adapts the Student Development Guide Section 6.2 scaffold (PDF pages
-7–8). Response parsing uses Appendix B (pages 20–22), query parameters use
-Section 7.2, and configuration names use Appendix D.
-
-- Retained requests.Session, X-Api-Key authentication, HTTPS validation,
-  disabled redirects, 5/15-second timeouts, 1.1-second request spacing,
-  three attempts for transport-failed GETs, jitter, and shared cooldown state.
-- Restricted the transport to GET and the three smoke-test endpoints. Removed
-  POST/body serialization and UncertainWrite for this milestone. Restore those
-  safeguards deliberately with write/reconciliation tests in a later milestone.
-- Errors expose HTTP status and a constrained error code, never raw bodies,
-  server messages, or underlying network exception text. HTML errors point to
-  the base URL/hosting layer. Unknown nonconforming error codes are suppressed.
-- Added HTTP-date Retry-After support alongside seconds and the guide's
-  15-second fallback. The CLI exits on cooldown instead of running a loop.
-- Disabled ambient proxies/.netrc via session.trust_env=False and added session
-  cleanup. Networks requiring a proxy/custom CA need an explicit future setup.
-- Tightened URL/key checks, added an 8 KiB configuration cap with known
-  string fields (now including optional Muse settings), and validated displayed response fields. The summary replaces
-  the scaffold's raw dictionary printing; monetary display uses Decimal.
-
-## Before committing
-
-Review the three-endpoint restriction, config placeholders, summary field mapping,
-and test results. Check `git status --short` and `git diff`; new files also need
-review because they do not appear in an unstaged diff until added. Verify ignores:
-
-```sh
-git check-ignore config.json config.local.json .venv/
 git status --short
 ```
 
-The existing `/docs` ignore rule is preserved. Course PDFs remain local.
-Do not stage real credentials. No commit or live Ledger check is automated.
+Tests use mocked transport/models and temporary state files. They cover replay
+fixtures, validation boundaries, independent Guardian reads, changes during review,
+uncertain writes, restarts, locking, and safe persistence. No live trade is used as
+an automated test. Review the diff before committing; examples must stay placeholders.
 
-AI assistance: Codex helped read the supplied course PDFs, adapt the scaffold,
-and implement/document/mock-test this milestone on 2026-11-20. The team should
-review this work and include an accurate AI-use disclosure and named member
-contributions in the final report, as required by both course documents.
+Still outstanding: historical theory snapshots, an explicit uncertain-ID resolution
+workflow, automated retry of a still-pending review after fresh reconciliation,
+repeated agent scheduling, full evaluation/audit reporting, and the final report
+and presentation. A missing old theory or unsupported custom strategy escalates
+or HOLDs instead of guessing. The journal searches only the latest 200 history
+records for a known ID; absent records remain unresolved. It cannot coordinate
+other devices or clients that use a different journal.
+
+AI assistance: Codex helped adapt the guide, implement the agents and tests, and
+simplify the code/documentation during 2026-11-20 through 2026-11-23. Include accurate
+AI-use disclosure and named team contributions in the course report. Report the
+public deterministic price generator: simulated profit is not forecasting proof.

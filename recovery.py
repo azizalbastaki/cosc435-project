@@ -1,13 +1,16 @@
-"""Durable local proposal journal. No network calls or automatic retries.
+"""Small persistent JSON journal: save before sending, never guess after a failure."""
 
-Future submission order: reserve -> mark_attempt -> send exactly once -> record
-response. Marking the attempt BEFORE sending makes a crash fail closed.
-"""
-
-import sqlite3
+from copy import deepcopy
+from datetime import datetime, timezone
+from decimal import Decimal
+import fcntl
+import json
+import os
 from pathlib import Path
+import tempfile
 from uuid import uuid4
 
+from configuration import unique_object
 from validation import SYMBOLS, number
 
 OPEN_STATES = ("PLANNED", "UNCERTAIN", "PENDING", "ESCALATED")
@@ -15,7 +18,7 @@ SERVER_STATES = ("PENDING", "ESCALATED", "EXECUTED", "BLOCKED", "REJECTED")
 
 
 class RecoveryError(RuntimeError):
-    """Unresolved or inconsistent state: do not submit another proposal."""
+    """Stop and reconcile before submitting another order."""
 
 
 def positive_id(value):
@@ -24,61 +27,132 @@ def positive_id(value):
     return value
 
 
-class ProposalJournal:
-    """Use one private database per Ledger account, shared by its trader runs.
+def number_from_text(value):
+    """Decode our stored quantity, not model output."""
+    return number(Decimal(value))
 
-    This coordinates only processes using that file. It cannot see proposals
-    from other devices or clients; a future live cycle must also read Ledger.
-    """
+
+class ProposalJournal:
+    """One JSON file per account. A lock prevents simultaneous runs (macOS/Linux)."""
 
     def __init__(self, path):
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.db = sqlite3.connect(path, timeout=5)
-        path.chmod(0o600)
-        self.db.row_factory = sqlite3.Row
-        # SQLite commits make the intent/attempt durable before returning.
-        self.db.execute("PRAGMA synchronous = FULL")
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS proposals (
-                intent_id TEXT PRIMARY KEY,
-                symbol TEXT NOT NULL,
-                action TEXT NOT NULL,
-                quantity TEXT NOT NULL,
-                theory_id INTEGER NOT NULL,
-                theory_version INTEGER NOT NULL,
-                state TEXT NOT NULL,
-                transaction_id INTEGER UNIQUE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # Database-enforced: two processes cannot reserve two open proposals.
-        self.db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS one_open_proposal
-            ON proposals ((1))
-            WHERE state IN ('PLANNED', 'UNCERTAIN', 'PENDING', 'ESCALATED')
-        """)
-        self.db.commit()
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Never silently leave an old database's unresolved orders behind.
+        if self.path.suffix != ".json" or self.path.with_suffix(".sqlite3").exists():
+            raise RecoveryError("Use a JSON journal; an existing SQLite journal requires deliberate migration")
+        self.lock = self.path.with_suffix(".lock").open("a")
+        self.path.with_suffix(".lock").chmod(0o600)
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.lock.close()
+            raise RecoveryError("Another run is using this account journal") from None
+        try:
+            if self.path.exists():
+                try:
+                    self.data = json.loads(self.path.read_text(), object_pairs_hook=unique_object)
+                except (ValueError, UnicodeError):
+                    raise RecoveryError("Unreadable recovery file; investigate instead of resetting it") from None
+                self._validate_file()
+                self.path.chmod(0o600)
+            else:
+                self.data = {"version": 1, "identity": None, "proposals": []}
+                self._save()
+        except Exception:
+            self.close()
+            raise
 
     def close(self):
-        self.db.close()
+        if not self.lock.closed:
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+            self.lock.close()
 
-    def open_proposal(self):
-        row = self.db.execute("""
-            SELECT * FROM proposals
-            WHERE state IN ('PLANNED', 'UNCERTAIN', 'PENDING', 'ESCALATED')
-        """).fetchone()
-        return dict(row) if row else None
+    def _validate_file(self):
+        """A damaged journal must never be treated as an empty journal."""
+        try:
+            if self.data["version"] != 1 or not isinstance(self.data["proposals"], list):
+                raise ValueError
+            if self.data["identity"] is not None and not isinstance(self.data["identity"], str):
+                raise ValueError
+            intents, transactions = set(), set()
+            open_count = 0
+            for row in self.data["proposals"]:
+                if not isinstance(row["intent_id"], str) or not row["intent_id"] or row["intent_id"] in intents:
+                    raise ValueError
+                intents.add(row["intent_id"])
+                if row["state"] not in (*OPEN_STATES, "EXECUTED", "BLOCKED", "REJECTED", "CANCELLED"):
+                    raise ValueError
+                if row["symbol"] not in SYMBOLS or row["action"] not in ("BUY", "SELL"):
+                    raise ValueError
+                if not isinstance(row["quantity"], str) or number_from_text(row["quantity"]) <= 0:
+                    raise ValueError
+                positive_id(row["theory_id"])
+                positive_id(row["theory_version"])
+                transaction_id = row["transaction_id"]
+                if transaction_id is not None:
+                    positive_id(transaction_id)
+                    if transaction_id in transactions:
+                        raise ValueError
+                    transactions.add(transaction_id)
+                if row["state"] in ("PENDING", "ESCALATED", "EXECUTED", "BLOCKED", "REJECTED") and transaction_id is None:
+                    raise ValueError
+                if row["review_decision"] not in (None, "APPROVE", "MODIFY", "BLOCK", "ESCALATE"):
+                    raise ValueError
+                open_count += row["state"] in OPEN_STATES
+            if open_count > 1:
+                raise ValueError
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            raise RecoveryError("Invalid recovery file; investigate it instead of deleting or resetting it") from None
+
+    def _save(self):
+        """Write a private temporary file, then atomically replace the old JSON."""
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", dir=self.path.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                json.dump(self.data, handle, indent=2, allow_nan=False)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+
+    def _row(self, intent_id):
+        for row in self.data["proposals"]:
+            if row["intent_id"] == intent_id:
+                return row
+        raise RecoveryError("Unknown proposal intent")
+
+    def _update(self, intent_id, **changes):
+        self._row(intent_id).update(changes, updated_at=datetime.now(timezone.utc).isoformat())
+        self._save()
 
     def get(self, intent_id):
-        row = self.db.execute("SELECT * FROM proposals WHERE intent_id = ?", (intent_id,)).fetchone()
-        if row is None:
-            raise RecoveryError("Unknown proposal intent")
-        return dict(row)
+        return deepcopy(self._row(intent_id))
+
+    def open_proposal(self):
+        for row in self.data["proposals"]:
+            if row["state"] in OPEN_STATES:
+                return deepcopy(row)
+        return None
+
+    def bind_identity(self, fingerprint):
+        if self.data["identity"] not in (None, fingerprint):
+            raise RecoveryError("Journal belongs to a different credential identity; do not bypass unresolved state")
+        self.data["identity"] = fingerprint
+        self._save()
 
     def reserve(self, order, theory_id, theory_version):
-        """Save a locally validated BUY/SELL before any attempt; never store keys/prose."""
+        if self.open_proposal() is not None:
+            raise RecoveryError("An earlier proposal is unresolved; reconcile before proposing again")
         if order.symbol not in SYMBOLS or order.action not in ("BUY", "SELL"):
             raise RecoveryError("Only BUY/SELL proposals belong in the journal")
         quantity = number(order.quantity)
@@ -87,53 +161,46 @@ class ProposalJournal:
         positive_id(theory_id)
         positive_id(theory_version)
         intent_id = uuid4().hex
-        try:
-            with self.db:
-                self.db.execute("""
-                    INSERT INTO proposals
-                    (intent_id, symbol, action, quantity, theory_id, theory_version, state)
-                    VALUES (?, ?, ?, ?, ?, ?, 'PLANNED')
-                """, (intent_id, order.symbol, order.action, format(quantity, "f"),
-                      theory_id, theory_version))
-        except sqlite3.IntegrityError:
-            raise RecoveryError("An earlier proposal is unresolved; reconcile before proposing again") from None
+        now = datetime.now(timezone.utc).isoformat()
+        self.data["proposals"].append({
+            "intent_id": intent_id, "symbol": order.symbol, "action": order.action,
+            "quantity": format(quantity, "f"), "theory_id": theory_id,
+            "theory_version": theory_version, "state": "PLANNED", "transaction_id": None,
+            "review_decision": None, "created_at": now, "updated_at": now,
+        })
+        self._save()
         return intent_id
 
     def mark_attempt(self, intent_id):
-        """Commit UNCERTAIN immediately BEFORE the future HTTP write."""
-        with self.db:
-            cursor = self.db.execute("""
-                UPDATE proposals SET state = 'UNCERTAIN', updated_at = CURRENT_TIMESTAMP
-                WHERE intent_id = ? AND state = 'PLANNED'
-            """, (intent_id,))
-            if cursor.rowcount != 1:
-                raise RecoveryError("Proposal cannot be sent or retried in its current state")
+        if self.get(intent_id)["state"] != "PLANNED":
+            raise RecoveryError("Proposal cannot be sent or retried in its current state")
+        self._update(intent_id, state="UNCERTAIN")
 
     def cancel_unsent(self, intent_id):
-        """Only a reserved intent that was never marked for sending can be cancelled."""
-        with self.db:
-            cursor = self.db.execute("""
-                UPDATE proposals SET state = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
-                WHERE intent_id = ? AND state = 'PLANNED'
-            """, (intent_id,))
-            if cursor.rowcount != 1:
-                raise RecoveryError("An attempted proposal requires Ledger reconciliation")
+        if self.get(intent_id)["state"] != "PLANNED":
+            raise RecoveryError("An attempted proposal requires Ledger reconciliation")
+        self._update(intent_id, state="CANCELLED")
+
+    def review_attempted(self, intent_id):
+        return self.get(intent_id)["review_decision"] is not None
+
+    def mark_review_attempt(self, intent_id, decision):
+        if decision not in ("APPROVE", "MODIFY", "BLOCK", "ESCALATE"):
+            raise RecoveryError("Invalid review decision")
+        if self.get(intent_id)["state"] != "PENDING" or self.review_attempted(intent_id):
+            raise RecoveryError("Review cannot be sent or retried; reconcile first")
+        self._update(intent_id, review_decision=decision)
 
     def record_response(self, intent_id, transaction_id, status):
-        """Record an initial BUY/SELL proposal reply, not a presumed execution."""
         positive_id(transaction_id)
         if status not in ("PENDING", "REJECTED"):
             raise RecoveryError("Unexpected proposal status; leave the attempt unresolved")
-        try:
-            with self.db:
-                cursor = self.db.execute("""
-                    UPDATE proposals SET transaction_id = ?, state = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE intent_id = ? AND state = 'UNCERTAIN' AND transaction_id IS NULL
-                """, (transaction_id, status, intent_id))
-                if cursor.rowcount != 1:
-                    raise RecoveryError("Cannot replace a recorded proposal response")
-        except sqlite3.IntegrityError:
-            raise RecoveryError("Transaction identifier is already recorded") from None
+        row = self.get(intent_id)
+        if row["state"] != "UNCERTAIN" or row["transaction_id"] is not None:
+            raise RecoveryError("Cannot replace a recorded proposal response")
+        if any(saved["transaction_id"] == transaction_id for saved in self.data["proposals"]):
+            raise RecoveryError("Transaction identifier is already recorded")
+        self._update(intent_id, transaction_id=transaction_id, state=status)
 
     def reconcile_known(self, intent_id, transaction):
         """Apply a validated Ledger history record ONLY for an already known ID.
@@ -169,18 +236,8 @@ class ProposalJournal:
         except (KeyError, TypeError, ValueError):
             raise RecoveryError("Incomplete or invalid history record") from None
 
-        with self.db:
-            cursor = self.db.execute("""
-                UPDATE proposals SET state = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE intent_id = ? AND state IN ('PENDING', 'ESCALATED')
-            """, (status, intent_id))
-            if cursor.rowcount != 1:
-                # An identical terminal observation is harmless; do not reopen it.
-                if self.get(intent_id)["state"] != status:
-                    raise RecoveryError("Cannot change a completed proposal's outcome")
-
-
-def number_from_text(value):
-    """Only for our own stored Decimal representation, not untrusted model output."""
-    from decimal import Decimal
-    return number(Decimal(value))
+        if current["state"] not in ("PENDING", "ESCALATED"):
+            if current["state"] != status:
+                raise RecoveryError("Cannot change a completed proposal's outcome")
+            return
+        self._update(intent_id, state=status)
