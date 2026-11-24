@@ -1,8 +1,0 @@
-{
-  "LEDGER_BASE_URL": "https://ledger.chanyeun.com/api/v1",
-  "TRADER_API_KEY": "PASTE_TRADER_SCOPED_KEY_HERE",
-  "LLM_PROVIDER": "meta_muse",
-  "META_BASE_URL": "https://api.meta.ai/v1",
-  "MUSE_MODEL": "muse-spark-1.3",
-  "META_API_KEY": "PASTE_META_API_KEY_HERE"
-}

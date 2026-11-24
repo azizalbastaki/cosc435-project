@@ -1,0 +1,113 @@
+{
+ "model": {
+  "version": "ledger-powerlaw-v1",
+  "simulated": true,
+  "shared": true,
+  "epoch_unix": 1767225600,
+  "tick_seconds": 5,
+  "price_decimals": 8,
+  "min_price": 1e-08,
+  "max_price": 10000000,
+  "power_timescale_days": 365,
+  "noise_modulus": 2147483647,
+  "noise_multiplier": 48271,
+  "cycles": [
+   {
+    "period_seconds": 600,
+    "phase": 0
+   },
+   {
+    "period_seconds": 7200,
+    "phase": 1.1
+   },
+   {
+    "period_seconds": 86400,
+    "phase": 2.3
+   }
+  ],
+  "assets": {
+   "BTC": {
+    "name": "Bitcoin",
+    "base_price": 64000,
+    "power_exponent": 0.45,
+    "phase": 0,
+    "cycle_amplitudes": [
+     0.004,
+     0.014,
+     0.045
+    ],
+    "noise_amplitude": 0.0008,
+    "noise_seed": 104729
+   },
+   "ETH": {
+    "name": "Ethereum",
+    "base_price": 3200,
+    "power_exponent": 0.6,
+    "phase": 0.7,
+    "cycle_amplitudes": [
+     0.006,
+     0.02,
+     0.06
+    ],
+    "noise_amplitude": 0.0012,
+    "noise_seed": 130363
+   },
+   "DOGE": {
+    "name": "Dogecoin",
+    "base_price": 0.14,
+    "power_exponent": 0.25,
+    "phase": 1.4,
+    "cycle_amplitudes": [
+     0.012,
+     0.035,
+     0.1
+    ],
+    "noise_amplitude": 0.003,
+    "noise_seed": 155921
+   },
+   "XMR": {
+    "name": "Monero",
+    "base_price": 170,
+    "power_exponent": 0.2,
+    "phase": 2.1,
+    "cycle_amplitudes": [
+     0.004,
+     0.012,
+     0.035
+    ],
+    "noise_amplitude": 0.0007,
+    "noise_seed": 180503
+   },
+   "XRP": {
+    "name": "XRP",
+    "base_price": 0.6,
+    "power_exponent": 0.35,
+    "phase": 2.8,
+    "cycle_amplitudes": [
+     0.008,
+     0.025,
+     0.07
+    ],
+    "noise_amplitude": 0.0018,
+    "noise_seed": 205019
+   },
+   "SOL": {
+    "name": "Solana",
+    "base_price": 150,
+    "power_exponent": 0.7,
+    "phase": 3.5,
+    "cycle_amplitudes": [
+     0.01,
+     0.03,
+     0.085
+    ],
+    "noise_amplitude": 0.0022,
+    "noise_seed": 229393
+   }
+  },
+  "server_time_unix": 1795349246,
+  "current_tick": 5624729,
+  "replay_start_unix": 1767225600,
+  "replay_end_unix": 1795349245
+ }
+}

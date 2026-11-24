@@ -1,0 +1,46 @@
+{
+  "_comment": "Copy to config.json (private, git-ignored). Keys come from environment variables: LEDGER_GUARDIAN_KEY (guardian scope, never the trader key) and the model key named in model_adapter.api_key_env.",
+  "base_url": "https://ledger.chanyeun.com/api/v1/",
+  "api_key": "PASTE_GUARDIAN_KEY_IN_ENV_LEDGER_GUARDIAN_KEY",
+  "poll_seconds": 15,
+  "batch_size": 2,
+  "allowed_symbols": [
+    "SOL"
+  ],
+  "expected_trader_key_labels": [
+    "PASTE_YOUR_TRADER_KEY_LABEL"
+  ],
+  "pinned_model_fingerprint": "",
+  "limits": {
+    "max_order_usd": 9000,
+    "escalate_above_usd": 20000,
+    "max_trades_per_hour": 4,
+    "max_trades_per_day": 24,
+    "burst_window_s": 120,
+    "burst_max_others": 2,
+    "size_z_threshold": 4.0
+  },
+  "checks": {
+    "price_tolerance_pct": 0.5,
+    "theory_slack_pct": 1.0,
+    "stale_order_s": 900
+  },
+  "risk": {
+    "escalate_at": 40,
+    "block_at": 75
+  },
+  "lockdown": {
+    "blocks_to_trigger": 3,
+    "window_s": 1800
+  },
+  "model_adapter": {
+    "provider": "meta",
+    "model": "muse-spark-1.3",
+    "api_key_env": "MODEL_API_KEY",
+    "timeout_s": 90,
+    "max_tokens": 8000,
+    "_note": "REQUIRED (course rule). Key only in the environment variable named by api_key_env, never in this file. Other providers: {\"provider\":\"openai\",\"model\":\"...\",\"api_key_env\":\"OPENAI_API_KEY\"} or {\"provider\":\"anthropic\",...}."
+  },
+  "state_file": "state/guardian_state.json",
+  "log_file": "logs/guardian.jsonl"
+}

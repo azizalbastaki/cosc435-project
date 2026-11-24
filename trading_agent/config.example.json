@@ -1,0 +1,41 @@
+{
+  "_comment": "Copy to config.json (private, git-ignored). Keys come from environment variables: LEDGER_TRADER_KEY and the model key named in model_adapter.api_key_env. Each team member sets their own symbol and theory version.",
+  "base_url": "https://ledger.chanyeun.com/api/v1/",
+  "api_key": "PASTE_TRADER_KEY_IN_ENV_LEDGER_TRADER_KEY",
+  "symbol": "SOL",
+  "cycle_seconds": 300,
+  "expected_theory": {
+    "version": 1,
+    "params": {
+      "lookback_minutes": 1440,
+      "threshold_pct": 9,
+      "position_fraction": 0.09,
+      "stop_loss_pct": 5,
+      "take_profit_pct": 30
+    },
+    "_note": "version = your submitted theory version; params must equal what you validated (set {} to skip the pin)"
+  },
+  "pinned_model_fingerprint": "",
+  "limits": {
+    "max_order_usd": 9000,
+    "min_order_usd": 100,
+    "max_trades_per_hour": 4,
+    "max_trades_per_day": 24,
+    "size_headroom_pct": 0.5
+  },
+  "checks": {
+    "max_5min_move_pct": 5.0,
+    "server_price_tolerance_pct": 0.5,
+    "block_cooldown_s": 900
+  },
+  "model_adapter": {
+    "provider": "meta",
+    "model": "muse-spark-1.3",
+    "api_key_env": "MODEL_API_KEY",
+    "timeout_s": 90,
+    "max_tokens": 8000,
+    "_note": "REQUIRED (course rule). Key only in the environment variable named by api_key_env, never in this file. Other providers: {\"provider\":\"openai\",\"model\":\"...\",\"api_key_env\":\"OPENAI_API_KEY\"} or {\"provider\":\"anthropic\",...}."
+  },
+  "state_file": "state/trading_agent_state.json",
+  "log_file": "logs/trading_agent.jsonl"
+}
