@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from streamlit.testing.v1 import AppTest
 from streamlit.proto.TextInput_pb2 import TextInput
@@ -7,6 +8,12 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class ScreenTests(unittest.TestCase):
     def test_all_screens_and_filter(self):
+        # UI assertions must not depend on the user's growing live audit history.
+        empty_history = patch('gui.backend.overview', return_value={
+            'trader': [], 'guardian': [], 'reviews': [], 'samples': [],
+            'sessions': [], 'decisions': {}, 'snapshot': {}})
+        empty_history.start()
+        self.addCleanup(empty_history.stop)
         app=AppTest.from_file(str(ROOT/'app.py')).run(timeout=30)
         self.assertTrue(any('TradeSentry' in x.value for x in app.markdown))
         for page in ['Overview','Live flow','Guardian','Activity','Setup']:

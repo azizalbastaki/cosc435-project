@@ -15,6 +15,17 @@ import run_session
 
 
 class DashboardTests(unittest.TestCase):
+    def test_setup_preserves_momentum_and_custom_pins(self):
+        params = {'lookback_minutes': 10, 'threshold_pct': 0.5, 'position_fraction': 0.05,
+                  'stop_loss_pct': 2, 'take_profit_pct': 5}
+        old = {'symbol': 'ETH', 'expected_theory': {'strategy': 'momentum', 'params': params}}
+        with tempfile.TemporaryDirectory() as d, patch.object(backend, 'ROOT', Path(d)), \
+                patch.object(backend, 'config', return_value=old), \
+                patch.object(backend, 'credentials', return_value={}), \
+                patch('tools.configure.write_configs') as write:
+            backend.save_setup('Member', 'ETH', 1, 'eth-trader', 'meta', 'muse-spark-1.3', True, {})
+        self.assertEqual(write.call_args.kwargs, {'strategy': 'momentum', 'params': params})
+
     def test_csv_escapes_formulas(self):
         text = backend.csv_bytes([{'reason': '=1+1', 'id': 7}]).decode()
         self.assertIn("'=1+1", text)

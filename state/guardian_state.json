@@ -1,0 +1,37 @@
+{
+ "reviewed": {
+  "642": {
+   "decision": "BLOCK",
+   "ts": 1795618121.024332,
+   "status": "BLOCKED"
+  }
+ },
+ "recent_blocks": [
+  1795618121.0243468
+ ],
+ "lockdown": null,
+ "escalations": {},
+ "theory_snapshots": {
+  "49:1": {
+   "hypothesis": "If ETH moves by at least 0.5% over 10 minutes, it may continue in that direction in the short term.",
+   "entry_rule": "Buy when ETH is up at least 0.5% compared with its price 10 minutes ago.",
+   "exit_rule": "If holding ETH, sell when its price is down at least 0.5% compared with 10 minutes ago, reaches 2% below the average purchase price, or reaches 3% above it. Give the stop-loss and take-profit rules priority. Hold when no rule applies.",
+   "risk_rule": "Cap each buy at 5% of available cash and within Ledger\u2019s transaction limit. Sell only ETH already held.",
+   "strategy": "momentum",
+   "selected_symbols": [
+    "ETH"
+   ],
+   "lookback_minutes": 10,
+   "threshold_pct": 0.5,
+   "position_fraction": 0.05,
+   "stop_loss_pct": 2,
+   "take_profit_pct": 3,
+   "id": 49,
+   "version": 1,
+   "status": "SUBMITTED",
+   "title": "Ethereum momentum",
+   "created_at": "2026-11-22 16:01:06"
+  }
+ },
+ "uncertain_reviews": {}
+}

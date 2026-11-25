@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,13 +53,21 @@ def controller(version: int = 2):  # version 2: supports the unlimited switch
 ctrl = controller()
 cfg = b.config('trading_agent')
 gcfg = b.config('guardian')
+configured_strategy = cfg.get('expected_theory', {}).get('strategy')
+observed_theory = b.read_json(ROOT/'state/dashboard_snapshot.json').get('theory') or {}
+observed_strategy = observed_theory.get('strategy')
+strategy_labels = {'momentum': 'Momentum', 'mean_reversion': 'Mean reversion', 'custom': 'Custom'}
 with st.sidebar:
     markup(f'<div class="brand">{theme.WORDMARK}</div><div class="brand-sub">{theme.TAGLINE}</div>')
     markup('<div class="eyebrow">WORKSPACE</div>')
     page = st.radio('Workspace', ['Overview', 'Live flow', 'Guardian', 'Activity', 'Setup'], label_visibility='collapsed')
     st.divider()
     markup('<div class="eyebrow">YOUR ENVIRONMENT</div><span class="pill orange">● &nbsp; Simulated trading</span>')
-    markup(f'<div class="account"><b>{esc(cfg.get("member") or "Your workspace")}</b><p>{esc(cfg["symbol"])} · Mean reversion</p><p>Theory v{esc(cfg.get("expected_theory", {}).get("version", "—"))}</p></div>')
+    markup(f'<div class="account"><b>{esc(cfg.get("member") or "Your workspace")}</b><p>{esc(cfg["symbol"])} · {esc(strategy_labels.get(observed_strategy or configured_strategy, "Strategy not confirmed"))}</p><p>{"Last observed on Ledger" if observed_strategy else "Local configuration"}</p><p>Theory v{esc(observed_theory.get("version") if observed_strategy else cfg.get("expected_theory", {}).get("version", "—"))}</p></div>')
+    if observed_strategy and configured_strategy != observed_strategy:
+        st.warning('Strategy mismatch: Ledger was last observed as '
+                   f'{strategy_labels.get(observed_strategy, observed_strategy)}, but the local pin is '
+                   f'{strategy_labels.get(configured_strategy, "not set")}. Review Setup before trading.')
     st.link_button('Open Ledger platform ↗', 'https://ledger.chanyeun.com', width='stretch')
     markup('<div class="footer">TradeSentry · COSC 435<br>Local workspace · Times in UAE (GST)</div>')
 
@@ -275,6 +284,10 @@ def setup_page():
         return
     a,z=st.columns([2,1],gap='large')
     with a:
+        selected_strategy = st.selectbox('Trading strategy', list(strategy_labels)[:2],
+                                        index=0 if (observed_strategy or configured_strategy) == 'momentum' else 1,
+                                        format_func=lambda value: strategy_labels[value], key='setup_strategy')
+        st.caption('Must match your active Ledger theory. Changing this setting does not change Ledger.')
         with st.form('setup'):
             section('Account & strategy','Match these settings to the theory submitted on Ledger.')
             name=st.text_input('Team member',value=cfg.get('member',''))
@@ -282,7 +295,10 @@ def setup_page():
             symbol=c1.selectbox('Assigned currency',list(COIN_THEORY),index=list(COIN_THEORY).index(cfg['symbol']))
             version=c2.number_input('Submitted theory version',min_value=1,value=int(cfg['expected_theory']['version']),step=1)
             label=st.text_input('Trader key label',value=gcfg.get('expected_trader_key_labels',[''])[0])
-            pin=st.checkbox('Validate against the team’s preset theory settings',value=bool(cfg['expected_theory'].get('params')))
+            pin=st.checkbox('Pin my validated theory parameters',value=bool(cfg['expected_theory'].get('params')))
+            params_text=st.text_area('Validated theory parameters (JSON)',
+                                    value=json.dumps(cfg['expected_theory'].get('params', {}), indent=2),
+                                    help='Enter your replay-validated lookback_minutes, threshold_pct, position_fraction, stop_loss_pct, and take_profit_pct. Mean-reversion presets are not momentum presets.')
             st.divider()
             section('Language model','Both agents use this provider. Model calls may incur charges.')
             provider=st.selectbox('Provider',list(PROVIDERS),index=list(PROVIDERS).index(cfg['model_adapter']['provider']))
@@ -300,7 +316,9 @@ def setup_page():
         if submitted:
             env={'meta':'MODEL_API_KEY','gemini':'GEMINI_API_KEY','openai':'OPENAI_API_KEY','anthropic':'ANTHROPIC_API_KEY'}[provider]
             try:
-                b.save_setup(name,symbol,version,label,provider,model,pin,{'LEDGER_TRADER_KEY':trader_key,'LEDGER_GUARDIAN_KEY':guardian_key,env:model_key})
+                params = json.loads(params_text) if pin else None
+                b.save_setup(name,symbol,version,label,provider,model,pin,{'LEDGER_TRADER_KEY':trader_key,'LEDGER_GUARDIAN_KEY':guardian_key,env:model_key},
+                             strategy=selected_strategy, params=params)
                 st.success('Workspace saved. Open Overview when you are ready to connect or run a session.')
             except ValueError as e:
                 st.error(str(e))

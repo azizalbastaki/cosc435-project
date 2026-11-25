@@ -1,0 +1,33 @@
+Self-tests OK.
+Session started 2026-11-25T14:36:26Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Reviewer stopped or an agent failed. Stopping both agents.
+Session ended 2026-11-25T14:36:31Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0, MODIFY 0, BLOCK 0, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+WARNING: Guardian stopped with an error: Startup check failed: Read failed; try a later cycle
+Results so far: python3 tools/session_report.py
+Self-tests OK.
+Session started 2026-11-25T14:37:27Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Reviewer stopped or an agent failed. Stopping both agents.
+Session ended 2026-11-25T14:37:32Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0, MODIFY 0, BLOCK 0, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+WARNING: Guardian stopped with an error: Startup check failed: Read failed; try a later cycle
+Results so far: python3 tools/session_report.py
+Self-tests OK.
+Session started 2026-11-25T14:40:31Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Reviewer stopped or an agent failed. Stopping both agents.
+Session ended 2026-11-25T14:40:36Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0, MODIFY 0, BLOCK 0, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+WARNING: Guardian stopped with an error: Startup check failed: Read failed; try a later cycle
+Results so far: python3 tools/session_report.py
+Self-tests OK.
+Session started 2026-11-25T14:45:44Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Session time limit reached. Stopping both agents.
+Session ended 2026-11-25T14:55:44Z: 0 proposal(s); Guardian reviews 1 (APPROVE 0, MODIFY 0, BLOCK 1, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+Results so far: python3 tools/session_report.py
+Self-tests OK.
+Session started 2026-11-25T14:56:12Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Session ended 2026-11-25T15:06:10Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0, MODIFY 0, BLOCK 0, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+Results so far: python3 tools/session_report.py
+Self-tests OK.
+Session started 2026-11-25T15:15:19Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Session ended 2026-11-25T15:17:17Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0, MODIFY 0, BLOCK 0, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+Results so far: python3 tools/session_report.py
+Self-tests OK.
+Session started 2026-11-25T15:21:36Z for 10.0 min: ETH. Ctrl+C stops both agents.

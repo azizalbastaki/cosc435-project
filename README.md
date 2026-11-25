@@ -34,8 +34,12 @@ For momentum, save and replay your own submitted theory export first. The existi
 `data/theory_v1.json` and dashboard Setup presets remain mean reversion. In the
 private Trader config set `expected_theory.strategy` to `momentum`, the matching
 `version`, and `params` to your validated numeric settings. This pin only checks
-Ledger's theory; it does not change the strategy on Ledger. Avoid saving the
-mean-reversion dashboard Setup over those settings.
+Ledger's theory; it does not change the strategy on Ledger. Dashboard Setup now
+offers an explicit strategy selector and your own numeric parameter pins; saving
+credentials preserves those settings instead of reverting to mean reversion.
+The sidebar labels cached Ledger observations as such and warns when the local
+strategy pin differs. Refresh from Ledger to update that observation. These UI
+corrections were made with Codex assistance; they do not relax validation limits.
 
 The CLI configuration tool accepts `--strategy momentum --no-pin`; this generates
 role-separated config skeletons without borrowing the mean-reversion numeric

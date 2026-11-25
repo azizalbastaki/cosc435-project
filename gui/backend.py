@@ -78,7 +78,7 @@ def readiness():
     return True, 'Configuration ready. Key validity is checked when connecting or starting.'
 
 
-def save_setup(member, symbol, version, label, provider, model, pin, new_keys):
+def save_setup(member, symbol, version, label, provider, model, pin, new_keys, strategy=None, params=None):
     from tools.configure import write_configs
     if not member.strip() or not label.strip() or not model.strip():
         raise ValueError('Enter your name, trader key label, and model name.')
@@ -91,12 +91,19 @@ def save_setup(member, symbol, version, label, provider, model, pin, new_keys):
     if values.get('LEDGER_TRADER_KEY') and values.get('LEDGER_TRADER_KEY') == values.get('LEDGER_GUARDIAN_KEY'):
         raise ValueError('Use different trader and Guardian keys.')
     old = config('trading_agent')
+    # Updating credentials must not silently change a member's strategy or pins.
+    strategy = strategy or old.get('expected_theory', {}).get('strategy')
+    if not strategy:
+        raise ValueError('Select the strategy matching your submitted Ledger theory.')
+    if pin and params is None:
+        params = old.get('expected_theory', {}).get('params') or None
     # Never attach another member's account to old recovery state.
     if (ROOT / 'state/trading_agent_state.json').exists() and (
         symbol != old.get('symbol') or any(values.get(k) != existing.get(k) for k in ['LEDGER_TRADER_KEY', 'LEDGER_GUARDIAN_KEY'] if existing.get(k))
     ):
         raise ValueError('Use a separate copy of this project for another coin or account, so recovery state and results stay separate.')
-    write_configs(symbol, int(version), label.strip(), provider, model.strip(), env_name, pin, member.strip())
+    write_configs(symbol, int(version), label.strip(), provider, model.strip(), env_name, pin, member.strip(),
+                  strategy=strategy, params=params if pin else None)
     if any(new_keys.values()):
         p = ROOT / '.env'
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

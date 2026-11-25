@@ -20,11 +20,22 @@ from common.presets import COIN_THEORY, PROVIDERS  # noqa: E402
 
 def write_configs(symbol: str, theory_version: int, trader_label: str, provider: str = "meta",
                   model: str | None = None, api_key_env: str | None = None, pin: bool = True,
-                  member: str = "", strategy: str = "mean_reversion") -> dict:
+                  member: str = "", strategy: str = "mean_reversion", params: dict | None = None) -> dict:
     if strategy not in ("mean_reversion", "momentum"):
         raise ValueError("unsupported strategy")
-    if strategy == "momentum" and pin:
+    if strategy == "momentum" and pin and params is None:
         raise ValueError("No researched momentum preset: use --no-pin, then pin your replay-validated params")
+    if params is not None:
+        from trading_agent.theory_check import validate_theory, TheoryInvalid
+        expected = set(COIN_THEORY["SOL"])
+        if not isinstance(params, dict) or set(params) != expected:
+            raise ValueError("Provide all five validated numeric theory parameters.")
+        try:
+            validate_theory(dict(params, id=1, version=theory_version, status="SUBMITTED",
+                                 selected_symbols=[symbol], strategy=strategy),
+                            {"symbol": symbol, "expected_theory": {}})
+        except TheoryInvalid as exc:
+            raise ValueError(str(exc)) from None
     if symbol not in COIN_THEORY:
         raise ValueError(f"unsupported symbol {symbol}")
     dmodel, denv, _ = PROVIDERS[provider]
@@ -43,7 +54,7 @@ def write_configs(symbol: str, theory_version: int, trader_label: str, provider:
             d["member"] = member
             d["expected_theory"]["version"] = theory_version
             d["expected_theory"]["strategy"] = strategy
-            d["expected_theory"]["params"] = dict(COIN_THEORY[symbol]) if pin else {}
+            d["expected_theory"]["params"] = dict(params if params is not None else COIN_THEORY[symbol]) if pin else {}
         else:
             d["allowed_symbols"] = [symbol]
             d["expected_trader_key_labels"] = [trader_label]
