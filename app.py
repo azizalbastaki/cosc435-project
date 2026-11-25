@@ -284,18 +284,21 @@ def setup_page():
         return
     a,z=st.columns([2,1],gap='large')
     with a:
+        trader_key=st.text_input('Ledger trader key',type='password', key='setup_trader_key',
+                                 help='Enter a key to fetch before saving. Blank uses the saved key.')
         if st.button('Fetch theory from Ledger', key='fetch_theory'):
             try:
                 with st.spinner('Reading your submitted theory…'):
-                    fetched = b.fetch_theory_settings()
+                    fetched = b.fetch_theory_settings(trader_key)
                 st.session_state.update(setup_strategy=fetched['strategy'], setup_symbol=fetched['symbol'],
                                         setup_version=fetched['version'], setup_pin=True,
                                         setup_params=json.dumps(fetched['params'], indent=2),
                                         fetched_theory=fetched)
+            except ValueError as exc:
+                st.error('Theory fetch: ' + str(exc))
             except Exception:
-                st.error('Could not fetch a supported submitted theory. Check your saved trader key, '
-                         'Ledger connection, and submitted theory. Existing fields were not changed.')
-        st.caption('Uses your saved trader key. Fetching only fills this form; Save workspace applies the settings locally.')
+                st.error('Theory fetch failed unexpectedly. Check the local configuration file format. No settings were saved.')
+        st.caption('Uses the trader key above, or your saved key when blank. Fetching only fills this form; Save workspace applies the settings locally.')
         fetched = st.session_state.get('fetched_theory')
         if fetched:
             st.caption(f"Fetched theory #{fetched['id']} · version {fetched['version']}. Review before saving.")
@@ -312,7 +315,6 @@ def setup_page():
             c1,c2=st.columns(2)
             symbol=c1.selectbox('Assigned currency',list(COIN_THEORY),index=list(COIN_THEORY).index(cfg['symbol']),key='setup_symbol')
             version=c2.number_input('Submitted theory version',min_value=1,value=int(cfg['expected_theory']['version']),step=1,key='setup_version')
-            label=st.text_input('Trader key label',value=gcfg.get('expected_trader_key_labels',[''])[0])
             pin=st.checkbox('Pin my validated theory parameters',value=bool(cfg['expected_theory'].get('params')),key='setup_pin')
             params_text=st.text_area('Validated theory parameters (JSON)',
                                     value=json.dumps(cfg['expected_theory'].get('params', {}), indent=2),
@@ -328,7 +330,12 @@ def setup_page():
                     'Stop active sessions, create replacement keys with the same role scopes, update them here, '
                     'verify access, then revoke the old keys in Ledger or your provider dashboard. '
                     'This is a reminder; TradeSentry does not automatically expire keys.')
-            trader_key=st.text_input('Ledger trader key',type='password')
+            saved_labels = gcfg.get('expected_trader_key_labels') or ['']
+            label=st.text_input('Trader key name on Ledger',
+                                value=saved_labels[0] if (b.ROOT/'guardian/config.json').exists() else '',
+                                placeholder='e.g. ETH Trader',
+                                help='Copy the Label shown beside your trader key on Ledger’s API Keys page. '
+                                     'This is a name, not the secret API key. The Guardian uses it to recognize your Trader.')
             guardian_key=st.text_input('Ledger Guardian key',type='password')
             model_key=st.text_input('Model provider key',type='password')
             submitted=st.form_submit_button('Save workspace',type='primary',width='stretch')
@@ -340,7 +347,9 @@ def setup_page():
                              strategy=selected_strategy, params=params)
                 st.success('Workspace saved. Open Overview when you are ready to connect or run a session.')
             except ValueError as e:
-                st.error(str(e))
+                st.error('Workspace not saved: ' + str(e))
+            except OSError:
+                st.error('Workspace could not be fully saved. Check folder permissions and disk space, then save again before starting.')
     with z:
         with st.container(border=True):
             section('Before your first session')
@@ -351,7 +360,7 @@ def setup_page():
         with st.expander('Your current theory preset'):
             st.json(cfg.get('expected_theory',{}))
         st.caption('Credentials stay in a private local .env file. Exclude it when sharing or submitting this project. Use a separate project copy for each member/account.')
-        st.caption('The included history belongs to the original SOL workspace. It is historical evidence, not a live connection or a new account’s results.')
+        st.caption('Personal recovery state and logs are excluded from Git. Existing project copies can still contain old local state.')
 
 
 if page=='Live flow':

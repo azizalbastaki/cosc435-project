@@ -78,15 +78,39 @@ def readiness():
     return True, 'Configuration ready. Key validity is checked when connecting or starting.'
 
 
-def fetch_theory_settings():
-    """One explicit GET using the saved trader key; return only setup fields."""
+def fetch_theory_settings(trader_key=""):
+    """Read with an entered or saved trader key; never persist credentials here."""
     from common.ledger_client import LedgerClient
     from trading_agent.theory_check import validate_structure, validate_theory, TheoryInvalid
     cfg = config('trading_agent')
-    key = credentials().get('LEDGER_TRADER_KEY')
+    key = trader_key or credentials().get('LEDGER_TRADER_KEY')
     if not key:
-        raise ValueError('Save your trader key before fetching the theory.')
-    theory = LedgerClient(cfg['base_url'], key).theory()
+        raise ValueError('Enter your Ledger trader key above, then fetch your theory.')
+    if any(c.isspace() for c in key) or key.startswith(('PASTE', 'PLACEHOLDER')):
+        raise ValueError('Paste the complete trader key without spaces or line breaks.')
+    from common.ledger_client import LedgerError, Cooldown
+    try:
+        theory = LedgerClient(cfg['base_url'], key).theory()
+    except Cooldown:
+        raise ValueError('Ledger requested a cooldown. Wait before fetching again.') from None
+    except LedgerError as exc:
+        if exc.status == 401:
+            message = 'Ledger rejected the trader key (HTTP 401). Check that it is active and complete.'
+        elif exc.status == 403:
+            message = 'Ledger denied access (HTTP 403). Use a trader-scoped key for your account.'
+        elif exc.status == 0:
+            import ssl
+            cause = exc.__cause__
+            reason = getattr(cause, 'reason', cause)
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                message = ('Python could not verify Ledger’s HTTPS certificate. On python.org macOS '
+                           'installations, run Install Certificates.command in your Python Applications folder. '
+                           'Keep certificate verification enabled.')
+            else:
+                message = 'Could not reach Ledger. Check your internet connection and configured API URL.'
+        else:
+            message = 'Ledger could not return the theory. Try again later or check its service status.'
+        raise ValueError(message) from None
     try:
         validate_structure(theory)
     except TheoryInvalid:
@@ -110,14 +134,20 @@ def fetch_theory_settings():
 
 def save_setup(member, symbol, version, label, provider, model, pin, new_keys, strategy=None, params=None):
     from tools.configure import write_configs
-    if not member.strip() or not label.strip() or not model.strip():
-        raise ValueError('Enter your name, trader key label, and model name.')
+    if not member.strip():
+        raise ValueError('Enter your name.')
+    if not label.strip():
+        raise ValueError('Enter the trader key’s name from the Label column on Ledger’s API Keys page.')
+    if not model.strip():
+        raise ValueError('Enter the model ID supported by your provider.')
     env_name = {'meta': 'MODEL_API_KEY', 'gemini': 'GEMINI_API_KEY', 'openai': 'OPENAI_API_KEY', 'anthropic': 'ANTHROPIC_API_KEY'}[provider]
     for value in new_keys.values():
         if value and (any(c.isspace() for c in value) or value.startswith(('PASTE', 'PLACEHOLDER'))):
             raise ValueError('Paste complete keys without spaces or line breaks.')
     existing = credentials()
     values = {**existing, **{k: v for k, v in new_keys.items() if v}}
+    if label.strip() in {value for value in values.values() if value}:
+        raise ValueError('The trader key name must be its Label on Ledger, not a secret API key.')
     if values.get('LEDGER_TRADER_KEY') and values.get('LEDGER_TRADER_KEY') == values.get('LEDGER_GUARDIAN_KEY'):
         raise ValueError('Use different trader and Guardian keys.')
     old = config('trading_agent')
@@ -131,7 +161,11 @@ def save_setup(member, symbol, version, label, provider, model, pin, new_keys, s
     if (ROOT / 'state/trading_agent_state.json').exists() and (
         symbol != old.get('symbol') or any(values.get(k) != existing.get(k) for k in ['LEDGER_TRADER_KEY', 'LEDGER_GUARDIAN_KEY'] if existing.get(k))
     ):
-        raise ValueError('Use a separate copy of this project for another coin or account, so recovery state and results stay separate.')
+        raise ValueError('This workspace contains recovery state from an existing account or currency. '
+                         'For a new teammate, use a clean distribution without state/, logs/, private.env, .env, '
+                         'or local config.json files. Copying the used folder also copies its state. '
+                         'Do not delete recovery state or use a fresh workspace to bypass unresolved orders. '
+                         'For same-account key rotation, preserve state and verify account identity before migration.')
     write_configs(symbol, int(version), label.strip(), provider, model.strip(), env_name, pin, member.strip(),
                   strategy=strategy, params=params if pin else None)
     if any(new_keys.values()):

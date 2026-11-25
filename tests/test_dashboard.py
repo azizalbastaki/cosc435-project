@@ -36,6 +36,53 @@ class DashboardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 backend.fetch_theory_settings()
 
+    def test_fetch_entered_key_without_saving(self):
+        theory = dict(id=1, version=1, status='SUBMITTED', strategy='momentum',
+                      selected_symbols=['ETH'], lookback_minutes=10, threshold_pct=0.5,
+                      position_fraction=0.05, stop_loss_pct=2, take_profit_pct=5)
+        with tempfile.TemporaryDirectory() as d, patch.object(backend, 'ROOT', Path(d)), \
+                patch.object(backend, 'config', return_value={'symbol': 'ETH', 'base_url': 'https://example.test'}), \
+                patch.object(backend, 'credentials', return_value={}), \
+                patch('common.ledger_client.LedgerClient') as client:
+            client.return_value.theory.return_value = theory
+            self.assertEqual(backend.fetch_theory_settings('entered-test-key')['symbol'], 'ETH')
+            client.assert_called_once_with('https://example.test', 'entered-test-key')
+            self.assertEqual(list(Path(d).iterdir()), [])
+
+    def test_fetch_errors_are_specific_and_do_not_echo_payloads(self):
+        import ssl
+        import urllib.error
+        from common.ledger_client import LedgerError
+        network = LedgerError(0, {'error': 'private-value'})
+        network.__cause__ = urllib.error.URLError(ssl.SSLCertVerificationError(1, 'private-value'))
+        cases = [(LedgerError(401, {'error': 'private-value'}), '401'),
+                 (LedgerError(403, {'error': 'private-value'}), '403'),
+                 (network, 'certificate'),
+                 (LedgerError(500, {'error': 'private-value'}), 'service status')]
+        with patch.object(backend, 'config', return_value={'symbol': 'ETH', 'base_url': 'https://example.test'}), \
+                patch('common.ledger_client.LedgerClient') as client:
+            for error, expected in cases:
+                with self.subTest(expected=expected):
+                    client.return_value.theory.side_effect = error
+                    with self.assertRaises(ValueError) as caught:
+                        backend.fetch_theory_settings('entered-test-key')
+                    self.assertIn(expected, str(caught.exception))
+                    self.assertNotIn('private-value', str(caught.exception))
+
+    def test_setup_rejects_secret_as_label_before_writing(self):
+        with patch.object(backend, 'credentials', return_value={}), \
+                patch('tools.configure.write_configs') as write:
+            with self.assertRaisesRegex(ValueError, 'not a secret API key'):
+                backend.save_setup('Member', 'ETH', 1, 'test-secret', 'meta', 'model', True,
+                                   {'LEDGER_TRADER_KEY': 'test-secret'}, strategy='momentum')
+            write.assert_not_called()
+
+    def test_setup_explains_missing_label(self):
+        with patch('tools.configure.write_configs') as write:
+            with self.assertRaisesRegex(ValueError, 'Label column'):
+                backend.save_setup('Member', 'ETH', 1, '', 'meta', 'model', True, {})
+            write.assert_not_called()
+
     def test_setup_preserves_momentum_and_custom_pins(self):
         params = {'lookback_minutes': 10, 'threshold_pct': 0.5, 'position_fraction': 0.05,
                   'stop_loss_pct': 2, 'take_profit_pct': 5}

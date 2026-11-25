@@ -40,9 +40,11 @@ credentials preserves those settings instead of reverting to mean reversion.
 The sidebar labels cached Ledger observations as such and warns when the local
 strategy pin differs. Refresh from Ledger to update that observation. These UI
 corrections were made with Codex assistance; they do not relax validation limits.
-In Setup, **Fetch theory from Ledger** reads your submitted theory with the saved
-trader key and fills the currency, strategy, version, and five numeric parameters.
-Review the populated form and press **Save workspace**. Fetching makes no model
+In Setup, **Fetch theory from Ledger** reads your submitted theory with the trader key entered above the button
+(or the saved key if blank) and fills the currency, strategy, version, and five numeric parameters.
+You can fetch before saving credentials. Review the populated form and press **Save workspace**.
+Fetch errors distinguish missing keys, rejected access, network/TLS failures, and invalid theories.
+Save errors identify local validation or recovery-state conflicts; do not delete recovery state to bypass them. Fetching makes no model
 calls or trades, changes no files, and does not modify the theory on Ledger.
 Local eligibility conflicts are shown explicitly; imported settings do not bypass
 the trading validator. This read-only import was implemented with Codex assistance.
@@ -76,8 +78,9 @@ average-cost logic, configuration, and offline tests. Disclose this in the repor
    6/hour, 30/day, escalate above $20,000, restrict WITHDRAW). Create a **trader** key and a **guardian** key.
 2. **Open the dashboard:** double-click **Start Dashboard.command** (Mac) or **Start Dashboard.bat** (Windows).
    First launch installs libraries (needs internet, ~1 min). If macOS blocks it: right-click > Open.
-3. **Setup screen:** your name, your coin, theory version, trader key label; paste your trader and Guardian keys
-   (leave the model key box EMPTY - the team Muse key is already saved). Press **Save workspace**.
+3. **Setup screen:** enter your trader key and fetch your theory. Enter your name and the **Trader key name on Ledger**
+   (the Label on Ledger’s API Keys page, not the secret key). Paste your Guardian key
+   and your authorized model-provider key. Blank fields preserve keys only if already saved locally. Press **Save workspace**.
 4. **Overview:** press **Refresh from Ledger** (read-only test of your keys), then **Start trading session**
    near your coin's buy/sell times (table further down). Sessions are max 10 minutes - keep **Unlimited** OFF.
 
@@ -110,7 +113,17 @@ Open http://127.0.0.1:8501. This is a local application; do not publish it publi
 
 Opening or browsing the GUI does not call Ledger or your model. **Refresh from Ledger** makes read-only requests. **Start trading session** starts both agents and may propose/review simulated trades and incur model charges. The parent runner stops both agents at the requested 1–10 minute limit, also stopping the trader if its reviewer exits. Closing a browser tab does not stop a session; use **Stop both agents**, or let the bounded session finish. Do not run the older command-line launchers simultaneously.
 
-The team Muse key is already in `.env`. Add your own two Ledger keys in Setup (or in `.env`). Each agent process receives only its own Ledger role key. Never share the private `.env` file. This copy starts clean (no logs, no saved state, no settings). Use it for ONE member and ONE coin only.
+Add your own two Ledger keys and authorized model-provider key in Setup (or in `.env`). Each agent process receives only its own Ledger role key. Never share private credential files. Use one workspace per member/account and coin.
+
+Distribute a clean source archive, excluding `state/`, `logs/`, `.ledger-state/`,
+`.env`, `private.env`, local `config.json` files, `.git/`, and virtual environments.
+Include the placeholder `config.example.json` files. A copied used folder or a
+clone of an older revision containing tracked state is not a clean workspace.
+State and logs are now excluded from the current Git revision, but older history
+and existing local copies may still contain them. Preserve recovery files in the
+original workspace; do not delete them to bypass unresolved orders. The clean distribution is for new member
+setup, not restarting an existing account with unknown outcomes. Same-account key
+rotation requires preserving recovery state and verifying account identity.
 
 ## Evidence and limits
 

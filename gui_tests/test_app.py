@@ -29,7 +29,7 @@ class ScreenTests(unittest.TestCase):
                 self.assertTrue(any('at least every two weeks' in x.value for x in app.info))
                 self.assertTrue(all(x.proto.type == TextInput.PASSWORD for x in app.text_input
                                     if x.label in ['Ledger trader key','Ledger Guardian key','Model provider key']))
-        app.text_input[0].set_value('')
+        next(x for x in app.text_input if x.label == 'Team member').set_value('')
         next(button for button in app.button if button.label == 'Save workspace').click().run()
         self.assertTrue(any('Enter your name' in x.value for x in app.error))
         self.assertFalse(app.exception)
@@ -43,9 +43,10 @@ class ScreenTests(unittest.TestCase):
                 patch('gui.backend.save_setup') as save, patch('gui.backend.SessionController.start') as start:
             app = AppTest.from_file(str(ROOT/'app.py')).run(timeout=30)
             app.sidebar.radio[0].set_value('Setup').run()
+            app.text_input(key='setup_trader_key').set_value('entered-test-key').run()
             app.button(key='fetch_theory').click().run()
             self.assertFalse(app.exception, str(app.exception))
-            fetch.assert_called_once()
+            fetch.assert_called_once_with('entered-test-key')
             self.assertEqual(app.selectbox(key='setup_strategy').value, 'momentum')
             self.assertEqual(app.selectbox(key='setup_symbol').value, 'ETH')
             self.assertEqual(app.number_input(key='setup_version').value, 7)
