@@ -13,7 +13,8 @@
       "stop_loss_pct": 5,
       "take_profit_pct": 30
     },
-    "_note": "version = your submitted theory version; params must equal what you validated (set {} to skip the pin)"
+    "_note": "Pin the validated strategy/version/params. Momentum needs its own validated settings, not the mean-reversion presets.",
+    "strategy": "mean_reversion"
   },
   "pinned_model_fingerprint": "",
   "limits": {

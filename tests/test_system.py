@@ -93,7 +93,7 @@ class StubTrader(_Stub):
         rec = payload["signals"]["rule_recommendation"]
         return {"symbol": payload["symbol"], "action": rec["action"],
                 "quantity": rec["quantity"] if rec["action"] != "HOLD" else 0,
-                "reasoning": f"Deviation {payload['signals']['deviation_pct']}% vs threshold; size within bounds."}
+                "reasoning": f"Deviation {payload['signals'].get('lookback_return_pct', payload['signals'].get('deviation_pct'))}% vs threshold; size within bounds."}
 
 
 class StubGuardian(_Stub):

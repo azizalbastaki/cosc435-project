@@ -1,5 +1,60 @@
 # START HERE (teammates)
 
+## Supported strategies
+
+The Trader selects **mean reversion** or **momentum** from the validated active
+Ledger theory, never from a model reply or a local strategy override. An optional
+`expected_theory.strategy` pin must match that theory. Custom strategies still HOLD.
+
+- Momentum: `(current price / price at the exact lookback start - 1) * 100`.
+  BUY at or above the positive threshold; SELL an existing position at or below
+  the negative threshold. Equality qualifies. Stop-loss and take-profit SELLs
+  take priority over either signal. No holdings means no SELL.
+- Mean reversion: the existing minute-sampled lookback-mean strategy and its
+  validated cycle-window constraints remain in place. Its 24-hour presets and
+  suggested trading windows below are **not momentum presets**. The existing
+  minute-sampled mean differs from the guide's generic 61-point mean; this change
+  preserves that researched strategy rather than silently changing its baseline.
+
+Momentum accepts the guide's 1–1440 minute lookback and 0.01–50% threshold, without
+the mean-reversion-only two-hour divisibility rule. Shared local safety limits
+remain: position fraction 0.001–0.2, stop loss 1–20%, take profit 5–100%, plus all
+order, cash, holdings, quota, and policy checks. Guardian reads its own matching
+theory snapshot, portfolio/history, and descriptor, then independently calculates
+momentum from the order time and exact lookback start. Mean-reversion slack is not
+applied to momentum. Shared pure math does not share credentials or fetched evidence.
+
+For momentum, save and replay your own submitted theory export first. The existing
+`data/theory_v1.json` and dashboard Setup presets remain mean reversion. In the
+private Trader config set `expected_theory.strategy` to `momentum`, the matching
+`version`, and `params` to your validated numeric settings. This pin only checks
+Ledger's theory; it does not change the strategy on Ledger. Avoid saving the
+mean-reversion dashboard Setup over those settings.
+
+The CLI configuration tool accepts `--strategy momentum --no-pin`; this generates
+role-separated config skeletons without borrowing the mean-reversion numeric
+presets. Add your replay-validated parameter pins before trading. It overwrites
+local configs, so edit existing configs directly if you need to preserve them.
+No private configs or saved trading state were changed by this implementation.
+
+Offline replay example (use your own saved theory file and evaluation dates):
+
+```sh
+.venv/bin/python -m trading_agent.replay --symbol ETH \
+  --model-file data/market_model.json --theory-file /path/to/saved-theory.json \
+  --start 2026-11-20T00:00 --end 2026-11-22T00:00
+```
+
+Replay validates the theory and descriptor, rejects insufficient pre-epoch history,
+and uses the same strategy code as the Trader. The model payload labels the strategy
+and supplies its relevant return or mean deviation. Models still may only HOLD or
+choose the locally recommended action within the existing size bounds. Recovery,
+role separation, model validation, price matching, and final monetary/policy
+rechecks remain in place. Simulator replay is not proof of real-world forecasting.
+
+Codex assisted with momentum support, consolidation of signal/risk-exit and
+average-cost logic, configuration, and offline tests. Disclose this in the report.
+
 1. **On Ledger (your own account):** submit and activate your coin's theory (text in `docs/Ledger_theories_all_coins.pdf`,
    rewrite the hypothesis in your own words, tick ONLY your coin). Set the Security Policy (your coin only, max $9,500,
    6/hour, 30/day, escalate above $20,000, restrict WITHDRAW). Create a **trader** key and a **guardian** key.

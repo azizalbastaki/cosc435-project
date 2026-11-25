@@ -55,19 +55,23 @@ def validate_theory(theory: dict, cfg: dict) -> dict:
     if exp.get("version") and int(theory["version"]) != int(exp["version"]):
         raise TheoryInvalid(f"theory version {theory['version']} differs from validated version {exp['version']};"
                             " re-run replay validation and update config before trading")
-    if theory["strategy"] != "mean_reversion":
+    if theory["strategy"] not in ("mean_reversion", "momentum"):
         raise TheoryInvalid(f"strategy {theory['strategy']} is not implemented by this agent")
+    if exp.get("strategy") and theory["strategy"] != exp["strategy"]:
+        raise TheoryInvalid("active strategy differs from the validated strategy pin")
     sym = cfg["symbol"]
     if sym not in theory["selected_symbols"]:
         raise TheoryInvalid(f"{sym} is not selected in the theory")
-    bounds = {"lookback_minutes": (60, 1440), "threshold_pct": (1, 20), "position_fraction": (0.001, 0.2),
+    bounds = {"position_fraction": (0.001, 0.2),
               "stop_loss_pct": (1, 20), "take_profit_pct": (5, 100)}
+    if theory["strategy"] == "mean_reversion":
+        bounds.update(lookback_minutes=(60, 1440), threshold_pct=(1, 20))
     for k, (lo, hi) in bounds.items():
         v = float(theory[k])
         if not lo <= v <= hi:
             raise TheoryInvalid(f"{k}={v} outside the validated safe range [{lo}, {hi}]")
     # the hypothesis relies on the lookback spanning whole cycles (10 min, 2 h, 24 h)
-    if int(theory["lookback_minutes"]) % 120:
+    if theory["strategy"] == "mean_reversion" and int(theory["lookback_minutes"]) % 120:
         raise TheoryInvalid("lookback must be a whole number of 2-hour cycles for the 24h-mean hypothesis")
     for k, v in exp.get("params", {}).items():
         if abs(float(theory[k]) - float(v)) > 1e-9:

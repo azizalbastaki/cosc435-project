@@ -20,7 +20,11 @@ from common.presets import COIN_THEORY, PROVIDERS  # noqa: E402
 
 def write_configs(symbol: str, theory_version: int, trader_label: str, provider: str = "meta",
                   model: str | None = None, api_key_env: str | None = None, pin: bool = True,
-                  member: str = "") -> dict:
+                  member: str = "", strategy: str = "mean_reversion") -> dict:
+    if strategy not in ("mean_reversion", "momentum"):
+        raise ValueError("unsupported strategy")
+    if strategy == "momentum" and pin:
+        raise ValueError("No researched momentum preset: use --no-pin, then pin your replay-validated params")
     if symbol not in COIN_THEORY:
         raise ValueError(f"unsupported symbol {symbol}")
     dmodel, denv, _ = PROVIDERS[provider]
@@ -38,6 +42,7 @@ def write_configs(symbol: str, theory_version: int, trader_label: str, provider:
             d["symbol"] = symbol
             d["member"] = member
             d["expected_theory"]["version"] = theory_version
+            d["expected_theory"]["strategy"] = strategy
             d["expected_theory"]["params"] = dict(COIN_THEORY[symbol]) if pin else {}
         else:
             d["allowed_symbols"] = [symbol]
@@ -52,6 +57,7 @@ def main():
     ap.add_argument("--theory-version", type=int, required=True)
     ap.add_argument("--trader-label", required=True, help="label of YOUR trader key on Ledger's API Keys page")
     ap.add_argument("--member", default="", help="your name (used in reports)")
+    ap.add_argument("--strategy", choices=("mean_reversion", "momentum"), default="mean_reversion")
     ap.add_argument("--no-pin", action="store_true")
     ap.add_argument("--provider", default="meta", choices=sorted(PROVIDERS))
     ap.add_argument("--model", default=None)
@@ -59,7 +65,7 @@ def main():
     a = ap.parse_args()
     try:
         r = write_configs(a.symbol, a.theory_version, a.trader_label, a.provider, a.model, a.api_key_env,
-                          not a.no_pin, a.member)
+                          not a.no_pin, a.member, a.strategy)
     except ValueError as exc:
         sys.exit(str(exc))
     print(f"wrote trading_agent/config.json and guardian/config.json for {r['symbol']}; model {r['model']} "

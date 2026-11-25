@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from common import market_model as mm, money
 from common.util import injection_hits, parse_utc
+from trading_agent import strategy, theory_check
 
 RANK = {"APPROVE": 0, "MODIFY": 1, "ESCALATE": 2, "BLOCK": 3}
 SUPPORTED = ("BTC", "ETH", "DOGE", "XMR", "XRP", "SOL")
@@ -92,16 +93,7 @@ def _history_qty(transactions: list, symbol: str) -> float:
 
 
 def avg_cost(transactions: list, symbol: str) -> float:
-    qty = cost = 0.0
-    for t in sorted(transactions, key=lambda t: t.get("transaction_id", 0)):
-        if t.get("symbol") != symbol or t.get("status") != "EXECUTED":
-            continue
-        q, px = float(t.get("executed_quantity") or 0), float(t.get("executed_price") or 0)
-        if t.get("action") == "BUY" and q > 0:
-            qty += q; cost += q * px
-        elif t.get("action") == "SELL" and q > 0 and qty > 0:
-            cost -= cost * min(q, qty) / qty; qty -= min(q, qty)
-    return cost / qty if qty > 1e-12 else 0.0
+    return strategy.avg_cost_from_history(transactions, symbol)[1]
 
 
 # ---------------------------------------------------------------- hard rules
@@ -190,23 +182,47 @@ def theory_checks(c: Context) -> list[Finding]:
         f.append(Finding("THEORY_MISMATCH", "theory", "ESCALATE", 45, "order cites no theory"))
     if not th:
         return f
-    lb = int(th.get("lookback_minutes", 1440))
+    try:
+        theory_check.validate_theory(th, {"symbol": sym, "expected_theory": {}})
+        if (th["id"], th["version"]) != (o.get("theory_id"), o.get("theory_version")):
+            raise theory_check.TheoryInvalid("snapshot identity differs from the order")
+    except theory_check.TheoryInvalid:
+        f.append(Finding("THEORY_INVALID", "theory", "ESCALATE", 45,
+                         "matching submitted theory is invalid or unsupported"))
+        return f
+    lb = th["lookback_minutes"]
+    if t_created - lb * 60 < c.model["epoch_unix"]:
+        f.append(Finding("INSUFFICIENT_HISTORY", "theory", "ESCALATE", 45,
+                         "lookback starts before the market epoch"))
+        return f
+    if th["strategy"] == "momentum":
+        current = mm.quote(c.model, sym, t_created)
+        start = mm.quote(c.model, sym, t_created - lb * 60)
+        value, features = strategy.signal_value(current, None, th, start_price=start)
+        held = holdings_qty(c.portfolio, sym, c.transactions)
+        expected, kind = strategy.direction(current, held, avg_cost(c.transactions, sym), th, value)
+        c.extra.update(features, strategy_exit=kind)
+        if action != expected:
+            f.append(Finding(f"OFF_THEORY_{action}", "theory", "ESCALATE", 45,
+                             f"momentum return {value:+.4f}% with threshold {th['threshold_pct']}%; "
+                             f"independent theory recommends {expected} ({kind})"))
+        return f
     samples = mm.minute_samples(c.model, sym, t_created, lb)
     mean = sum(samples) / len(samples)
     dev = (mm.quote(c.model, sym, t_created) / mean - 1) * 100
     thr = float(th.get("threshold_pct", 9))
     slack = c.cfg["checks"]["theory_slack_pct"]
-    c.extra.update(mean_24h=round(mean, 4), deviation_pct=round(dev, 3))
+    c.extra.update(strategy="mean_reversion", lookback_mean=round(mean, 4), deviation_pct=round(dev, 3))
     if action == "BUY" and dev > -(thr - slack):
         f.append(Finding("OFF_THEORY_BUY", "theory", "ESCALATE", 45,
-                         f"BUY while price is {dev:+.2f}% vs 24h mean; theory only buys at <= -{thr}%: behaviour change"))
+                         f"BUY while price is {dev:+.2f}% vs lookback mean; theory only buys at <= -{thr}%: behaviour change"))
     if action == "SELL":
         ac = avg_cost(c.transactions, sym)
         sl, tp = float(th.get("stop_loss_pct", 5)), float(th.get("take_profit_pct", 30))
         exit_ok = dev >= thr - slack or (ac and (px <= ac * (1 - sl / 100) * 1.002 or px >= ac * (1 + tp / 100) * 0.998))
         if not exit_ok:
             f.append(Finding("OFF_THEORY_SELL", "theory", "ESCALATE", 40,
-                             f"SELL while price is {dev:+.2f}% vs 24h mean and no stop/take-profit condition: behaviour change"))
+                             f"SELL while price is {dev:+.2f}% vs lookback mean and no stop/take-profit condition: behaviour change"))
     return f
 
 

@@ -164,7 +164,8 @@ class TradingAgent:
         price = float(quote["price"])
         cash = float(port.get("cash_balance", 0))
         held, avg = self._position(port, txs, sym)
-        sig = strategy.decide(price, samples, held, avg, cash, theory, lim)
+        sig = strategy.decide(price, samples, held, avg, cash, theory, lim,
+                              start_price=mm.quote(model, sym, t_now - lookback * 60))
         bounds = self._bounds(price, cash, held, theory, policy)
         if sig.action == "BUY":
             sig.quantity = bounds["max_buy_quantity"]
