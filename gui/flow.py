@@ -106,6 +106,7 @@ def active_requests(rows, now_ms, running):
 
 
 def render(rows, mode, running, now_ms, models):
+    from gui import theme
     payload={'events':rows[-1500:],'mode':mode,'running':running,'now':now_ms,'models':models,'truncated':len(rows)>1500}
     encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-    return (Path(__file__).with_name('flow.html')).read_text().replace('__FLOW_DATA__',encoded)
+    return (Path(__file__).with_name('flow.html')).read_text().replace('__FLOW_DATA__',encoded).replace('__BRAND_CSS__',theme.css())

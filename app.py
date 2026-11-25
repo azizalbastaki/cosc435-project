@@ -1,4 +1,4 @@
-"""Ledger Control Room. Launch with: python -m streamlit run app.py"""
+"""TradeSentry. Launch with: python -m streamlit run app.py"""
 from __future__ import annotations
 
 import html
@@ -14,9 +14,10 @@ import plotly.graph_objects as go
 import streamlit as st
 from common.presets import COIN_THEORY, PROVIDERS
 from gui import backend as b
+from gui import theme
 
-st.set_page_config(page_title='Ledger · Control Room', page_icon='◈', layout='wide', initial_sidebar_state='expanded')
-st.markdown('<style>' + (ROOT / 'gui/style.css').read_text() + '</style>', unsafe_allow_html=True)
+st.set_page_config(page_title=theme.NAME, page_icon=theme.ICON, layout='wide', initial_sidebar_state='expanded')
+st.markdown('<style>' + theme.css() + (ROOT / 'gui/style.css').read_text() + '</style>', unsafe_allow_html=True)
 
 
 def esc(value):
@@ -52,18 +53,18 @@ ctrl = controller()
 cfg = b.config('trading_agent')
 gcfg = b.config('guardian')
 with st.sidebar:
-    markup('<div class="brand"><span class="brand-icon">≋</span> ledger<span style="color:#df663c">.</span></div><div class="brand-sub">AGENT CONTROL ROOM</div>')
+    markup(f'<div class="brand">{theme.WORDMARK}</div><div class="brand-sub">{theme.TAGLINE}</div>')
     markup('<div class="eyebrow">WORKSPACE</div>')
     page = st.radio('Workspace', ['Overview', 'Live flow', 'Guardian', 'Activity', 'Setup'], label_visibility='collapsed')
     st.divider()
     markup('<div class="eyebrow">YOUR ENVIRONMENT</div><span class="pill orange">● &nbsp; Simulated trading</span>')
     markup(f'<div class="account"><b>{esc(cfg.get("member") or "Your workspace")}</b><p>{esc(cfg["symbol"])} · Mean reversion</p><p>Theory v{esc(cfg.get("expected_theory", {}).get("version", "—"))}</p></div>')
     st.link_button('Open Ledger platform ↗', 'https://ledger.chanyeun.com', width='stretch')
-    markup('<div class="footer">COSC 435 · AI Security Engineering<br>Local workspace · Times in UAE (GST)</div>')
+    markup('<div class="footer">TradeSentry · COSC 435<br>Local workspace · Times in UAE (GST)</div>')
 
 
 def heading(title, subtitle):
-    markup(f'<div class="topline"><span>Workspace &nbsp; / &nbsp; <b>{esc(page)}</b></span><span class="pill">◈ &nbsp; LEDGER / COSC 435</span></div>')
+    markup(f'<div class="topline"><span>Workspace &nbsp; / &nbsp; <b>{esc(page)}</b></span><span class="pill">◈ &nbsp; TRADESENTRY / WORKSPACE</span></div>')
     st.title(title)
     st.caption(subtitle)
 
@@ -81,14 +82,14 @@ def chart(samples):
     frame['time'] = pd.to_datetime([datetime.fromisoformat(str(t).replace('Z', '+00:00')) for t in frame.ts],
                                    utc=True).tz_convert('Asia/Dubai')
     fig = go.Figure(go.Scatter(x=frame.time, y=frame.total_value, mode='lines+markers',
-                             line=dict(color='#df663c', width=3, shape='linear'), marker=dict(size=7, color='#df663c'),
-                             fill='tozeroy', fillcolor='rgba(223,102,60,.07)',
+                             line=dict(color=theme.COLORS['emerald'], width=3, shape='linear'), marker=dict(size=7, color=theme.COLORS['emerald']),
+                             fill='tozeroy', fillcolor='rgba(56,229,173,.05)',
                              hovertemplate='%{x|%d %b %H:%M GST}<br>$%{y:,.2f}<extra></extra>'))
     vals = frame.total_value.astype(float)
     pad = max((vals.max()-vals.min())*.3, abs(vals.mean())*.002, 1)
     fig.update_layout(height=255, margin=dict(l=0,r=12,t=18,b=0), paper_bgcolor='rgba(0,0,0,0)',
-                      plot_bgcolor='rgba(0,0,0,0)', font=dict(family='DM Sans, sans-serif', color='#8a95a4',size=11),
-                      yaxis=dict(range=[vals.min()-pad, vals.max()+pad], tickprefix='$', tickformat=',.0f',gridcolor='#edf0f4',zeroline=False),
+                      plot_bgcolor='rgba(0,0,0,0)', font=dict(family=theme.MONO, color=theme.COLORS['steel'],size=11),
+                      yaxis=dict(range=[vals.min()-pad, vals.max()+pad], tickprefix='$', tickformat=',.0f',gridcolor=theme.COLORS['graphite'],zeroline=False),
                       xaxis=dict(showgrid=False,tickformat='%H:%M',title=None), showlegend=False)
     st.plotly_chart(fig, width='stretch', config={'displayModeBar':False})
     st.caption(f'{len(samples)} recorded samples · GST · Lines connect observations; gaps are not continuous monitoring.')
@@ -98,6 +99,13 @@ def review_table(reviews):
     return [{'Time (GST)':stamp(r.get('ts') or r.get('created_at')), 'Order':r.get('tx',r.get('transaction_id')),
              'Asset':r.get('symbol',cfg['symbol']), 'Action':r.get('action','—'), 'Decision':r.get('decision'),
              'Risk / 100':r.get('risk_score'), 'Ledger status':r.get('server_status','Not in local log')} for r in reversed(reviews)]
+
+
+def decision_frame(rows):
+    frame = pd.DataFrame(rows)
+    if 'Decision' in frame.columns:
+        return frame.style.map(theme.decision_style, subset=['Decision'])
+    return frame
 
 
 def status_panel():
@@ -155,7 +163,7 @@ def dashboard():
     source_time = snap_time if snap_time > sample_time else last_sample.get('ts')
     if page == 'Overview':
         markup('<div class="topline"><span>Workspace &nbsp; / &nbsp; <b>Overview</b></span><span class="pill">● &nbsp; Local audit history</span></div>')
-        markup('''<div class="hero"><div class="eyebrow">AUTONOMY, WITH OVERSIGHT</div><h1>Every trade.<br>A second opinion.</h1><p>Your trading agent and AI Guardian, together in one place.<br>Follow the decisions. Understand the protection.</p><svg class="hero-art" viewBox="0 0 200 160" fill="none"><circle cx="106" cy="78" r="68" stroke="#3a4d63"/><circle cx="106" cy="78" r="48" stroke="#3a4d63" stroke-dasharray="3 6"/><path d="M106 31L142 45V78C142 104 106 122 106 122S70 104 70 78V45L106 31Z" fill="#293d54" stroke="#e69771" stroke-width="1.5"/><path d="M91 76L102 87L123 64" stroke="#e69771" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="169" cy="53" r="6" fill="#df663c"/><circle cx="47" cy="112" r="4" fill="#849ab3"/></svg></div>''')
+        markup(f'<div class="hero"><div class="eyebrow">TRADESENTRY · AUTONOMY WITH OVERSIGHT</div><h1>Trade intelligently.<br>Stay protected.</h1><p>{theme.DESCRIPTION}</p><div class="hero-art" aria-hidden="true">{theme.ICON}</div></div>')
         left, right = st.columns([3.25,1.3], gap='large')
         with left:
             c1,c2,c3=st.columns(3)
@@ -169,7 +177,7 @@ def dashboard():
             with st.container(border=True):
                 section('Recent decisions','What your Guardian reviewed, and what Ledger returned.')
                 if data['reviews']:
-                    st.dataframe(pd.DataFrame(review_table(data['reviews'][-5:])), hide_index=True, width='stretch')
+                    st.dataframe(decision_frame(review_table(data['reviews'][-5:])), hide_index=True, width='stretch')
                 else:
                     st.info('No Guardian decisions recorded yet.')
         with right:
@@ -191,7 +199,9 @@ def dashboard():
         heading('The second line of defense.', 'Inspect security decisions, triggered rules, and the reasoning behind each review.')
         counts=data['decisions']
         for col,name in zip(st.columns(4), ['APPROVE','MODIFY','BLOCK','ESCALATE']):
-            col.metric(name.title(),counts.get(name,0))
+            with col:
+                markup(f'<div class="decision {name.lower()}">{name}</div>')
+                st.metric('Recorded reviews', counts.get(name,0))
         st.write('')
         a,z=st.columns([2.5,1.2],gap='large')
         with a:
@@ -202,6 +212,9 @@ def dashboard():
                 st.info('No decisions match this filter.')
             for r in rows[:30]:
                 with st.expander(f"#{r.get('tx')} · {r.get('decision')} · {r.get('symbol')} {r.get('action')} · Risk {r.get('risk_score', '—')}/100"):
+                    decision_class = str(r.get('decision', '')).lower()
+                    if decision_class in ('approve', 'modify', 'block', 'escalate'):
+                        markup(f'<div class="decision {decision_class}">{esc(r.get("decision"))}</div>')
                     st.caption(stamp(r.get('ts')))
                     st.write(r.get('reason','No explanation recorded.'))
                     st.caption(f"Ledger result: {r.get('server_status','Unknown')} · Reduced quantity: {r.get('modified_quantity') or 'Not modified'}")
@@ -233,19 +246,19 @@ def dashboard():
                 st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
                 if any(r.get('within_10_minutes') is False for r in rows):
                     st.warning('A historical session exceeds 10 minutes by its timestamps. The original record is preserved; requested duration is not elapsed duration.')
-                st.download_button('Download sessions CSV',b.csv_bytes(rows),'ledger-sessions.csv','text/csv')
+                st.download_button('Download sessions CSV',b.csv_bytes(rows),'tradesentry-sessions.csv','text/csv')
             else:
                 st.info('No completed sessions yet.')
         with tabs[1]:
             rows=review_table(data['reviews'])
-            st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
-            st.download_button('Download reviews CSV',b.csv_bytes([{**r,'reason':raw.get('reason','')} for r,raw in zip(rows,reversed(data['reviews']))]),'ledger-reviews.csv','text/csv',disabled=not rows)
+            st.dataframe(decision_frame(rows),hide_index=True,width='stretch')
+            st.download_button('Download reviews CSV',b.csv_bytes([{**r,'reason':raw.get('reason','')} for r,raw in zip(rows,reversed(data['reviews']))]),'tradesentry-reviews.csv','text/csv',disabled=not rows)
         with tabs[2]:
             kinds=sorted({e.get('event','') for e in data['trader']})
             selected=st.multiselect('Event types',kinds,default=[k for k in ['proposed','order_outcome','hold','model_decision'] if k in kinds])
             rows=[e for e in reversed(data['trader']) if e.get('event') in selected]
             st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
-            st.download_button('Download selected events CSV',b.csv_bytes(rows),'ledger-events.csv','text/csv',disabled=not rows)
+            st.download_button('Download selected events CSV',b.csv_bytes(rows),'tradesentry-events.csv','text/csv',disabled=not rows)
         with tabs[3]:
             if snap:
                 st.caption('Read from Ledger: '+stamp(snap.get('fetched_at'))+' · At most the latest 200 transactions.')
@@ -276,6 +289,10 @@ def setup_page():
             model=st.text_input('Model ID',value=cfg['model_adapter']['model'],help='Enter the exact model ID supported by your provider. Changing provider does not automatically change this value.')
             st.divider()
             section('Private credentials','Leave a key blank to keep its saved value. Keys are never displayed.')
+            st.info('Rotate your Ledger trader, Guardian, and model provider API keys at least every two weeks. '
+                    'Stop active sessions, create replacement keys with the same role scopes, update them here, '
+                    'verify access, then revoke the old keys in Ledger or your provider dashboard. '
+                    'This is a reminder; TradeSentry does not automatically expire keys.')
             trader_key=st.text_input('Ledger trader key',type='password')
             guardian_key=st.text_input('Ledger Guardian key',type='password')
             model_key=st.text_input('Model provider key',type='password')

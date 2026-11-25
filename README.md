@@ -1,4 +1,10 @@
-# START HERE (teammates)
+# TradeSentry
+
+**Trade intelligently. Stay protected.**
+
+Autonomous trading with independent AI security supervision.
+
+## Start here (teammates)
 
 ## Supported strategies
 
@@ -65,7 +71,7 @@ average-cost logic, configuration, and offline tests. Disclose this in the repor
 4. **Overview:** press **Refresh from Ledger** (read-only test of your keys), then **Start trading session**
    near your coin's buy/sell times (table further down). Sessions are max 10 minutes - keep **Unlimited** OFF.
 
-# Ledger Control Room — Streamlit GUI
+# TradeSentry — Streamlit dashboard
 
 A local dashboard for the existing Trading Agent and AI Guardian. The original project is preserved separately.
 
@@ -115,7 +121,7 @@ GUI and session-control additions were drafted with OpenAI Codex. Include this i
 
 ---
 
-# COSC 435 — Trading Agent + independent AI Guardian for Ledger (v8.1, team edition)
+# TradeSentry — COSC 435 Trading Agent + independent AI Guardian for Ledger
 
 ## TEAM QUICKSTART (each member, about 15 minutes)
 
@@ -254,3 +260,16 @@ New sessions record millisecond timestamps, a shared run ID, separate process/ro
 Two unmatched start events in different lanes identify observed concurrent operations. Local stage transitions are instantaneous observations, not measured processing spans. The original logs lack request start/end timing, so their replay shows only recorded decisions and transitions; it does not manufacture API timing or concurrency. Diagram model names in replay come from the selected session. Model answers remain explicitly unvalidated until later local checks. Ledger outcomes remain separate from Guardian approval.
 
 API telemetry excludes authentication headers, keys, full prompts, reasoning request bodies, and raw provider replies. The inspector shows model-returned rationales and deterministic findings, not private model reasoning. The flow does not change the trading strategy or Guardian's decision rules.
+
+## Visual identity
+
+TradeSentry uses a Midnight/Slate dark interface, Ice White text, and restrained Emerald accents.
+The vector wordmark sets Trade in #F4F7FB and Sentry in #38E5AD; the shield/chart icon doubles as the favicon.
+Inter is used for interface text and JetBrains Mono for figures and technical details, with local fallbacks
+if Google Fonts is unavailable. `gui/theme.py` supplies shared CSS/chart tokens; `.streamlit/config.toml`
+mirrors the base colors for native widgets. Guardian outcomes retain both text labels and distinct colors.
+Codex assisted with this presentation-only rebrand. Trading and security behavior are unchanged.
+
+Setup includes a reminder to rotate Ledger and model-provider API keys at least every two weeks.
+Stop sessions, replace keys with the same scopes, update and verify access, then revoke the old keys.
+This reminder does not track key age, expire credentials, or change authentication behavior.

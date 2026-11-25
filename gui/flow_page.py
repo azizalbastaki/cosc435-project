@@ -7,7 +7,7 @@ from gui import backend, flow
 
 
 def show(controller, cfg, gcfg):
-    st.title('Watch the decisions move.')
+    st.title('Live flow')
     st.caption('Two agents, their APIs, and the evidence behind each outcome. Click a diagram node to learn its job.')
     mode=st.radio('Flow mode',['Live now','Replay saved history'],horizontal=True,key='flow_mode')
     models={role: f"{c['model_adapter']['provider']} · {c['model_adapter']['model']}" for role,c in [('trader',cfg),('guardian',gcfg)]}
@@ -48,12 +48,12 @@ def show(controller, cfg, gcfg):
                 table=[{'Role':e['role'],'API':e.get('endpoint'), 'HTTP':e.get('http_status'),
                         'Duration (ms)':e.get('duration_ms'), 'Outcome':e['outcome'], 'Purpose':e['why']} for e in calls]
                 st.dataframe(pd.DataFrame(table),hide_index=True,width='stretch')
-                st.download_button('Download API trace CSV',backend.csv_bytes(table),'ledger-api-trace.csv','text/csv')
+                st.download_button('Download API trace CSV',backend.csv_bytes(table),'tradesentry-api-trace.csv','text/csv')
             else:
                 st.info('These older logs predate API tracing. New sessions record endpoint names, start/end times, latency, and safe response summaries.')
     with st.expander('How to read the flow'):
         st.markdown('''- **Concurrent lanes:** the trader and Guardian run independently. Only recorded, unmatched API starts count as in-flight work; completed calls are not shown as still running.
-- **Orange / blue dots:** trader / Guardian activity. In replay, they highlight the selected recorded transition. Exact API timing is available only for new sessions.
+- **Emerald / blue dots:** trader / Guardian activity. In replay, they highlight the selected recorded transition. Exact API timing is available only for new sessions.
 - **Model response ≠ accepted order:** returned JSON still passes local validation. The inspector marks it as unvalidated until the later decision event.
 - **APPROVE ≠ EXECUTED:** an approval requests a fill; Ledger has the final say. The outcome node shows the recorded platform result.
 - **Reasoning:** the inspector shows the model's returned explanation, deterministic rule findings, sizing bounds, and recorded evidence—not private internal model thoughts.

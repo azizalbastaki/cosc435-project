@@ -1,12 +1,14 @@
 import unittest
 from pathlib import Path
 from streamlit.testing.v1 import AppTest
+from streamlit.proto.TextInput_pb2 import TextInput
 
 ROOT=Path(__file__).resolve().parents[1]
 
 class ScreenTests(unittest.TestCase):
     def test_all_screens_and_filter(self):
         app=AppTest.from_file(str(ROOT/'app.py')).run(timeout=30)
+        self.assertTrue(any('TradeSentry' in x.value for x in app.markdown))
         for page in ['Overview','Live flow','Guardian','Activity','Setup']:
             app.sidebar.radio[0].set_value(page).run(timeout=30)
             self.assertFalse(app.exception, str(app.exception))
@@ -16,6 +18,10 @@ class ScreenTests(unittest.TestCase):
             if page=='Guardian':
                 app.selectbox[0].set_value('BLOCK').run()
                 self.assertTrue(any('No decisions match' in x.value for x in app.info))
+            if page=='Setup':
+                self.assertTrue(any('at least every two weeks' in x.value for x in app.info))
+                self.assertTrue(all(x.proto.type == TextInput.PASSWORD for x in app.text_input
+                                    if x.label in ['Ledger trader key','Ledger Guardian key','Model provider key']))
         app.text_input[0].set_value('')
         app.button[0].click().run()
         self.assertTrue(any('Enter your name' in x.value for x in app.error))
