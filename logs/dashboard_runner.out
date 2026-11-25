@@ -31,3 +31,5 @@ Session ended 2026-11-25T15:17:17Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0
 Results so far: python3 tools/session_report.py
 Self-tests OK.
 Session started 2026-11-25T15:21:36Z for 10.0 min: ETH. Ctrl+C stops both agents.
+Session ended 2026-11-25T15:25:04Z: 0 proposal(s); Guardian reviews 0 (APPROVE 0, MODIFY 0, BLOCK 0, ESCALATE 0); model failures 0. Recorded in logs/sessions.csv.
+Results so far: python3 tools/session_report.py

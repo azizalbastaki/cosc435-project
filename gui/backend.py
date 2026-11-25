@@ -78,6 +78,36 @@ def readiness():
     return True, 'Configuration ready. Key validity is checked when connecting or starting.'
 
 
+def fetch_theory_settings():
+    """One explicit GET using the saved trader key; return only setup fields."""
+    from common.ledger_client import LedgerClient
+    from trading_agent.theory_check import validate_structure, validate_theory, TheoryInvalid
+    cfg = config('trading_agent')
+    key = credentials().get('LEDGER_TRADER_KEY')
+    if not key:
+        raise ValueError('Save your trader key before fetching the theory.')
+    theory = LedgerClient(cfg['base_url'], key).theory()
+    try:
+        validate_structure(theory)
+    except TheoryInvalid:
+        raise ValueError('Ledger did not return a valid submitted theory.') from None
+    if theory['strategy'] not in ('momentum', 'mean_reversion'):
+        raise ValueError('This app supports momentum and mean reversion only.')
+    selected = theory['selected_symbols']
+    symbol = cfg['symbol'] if cfg['symbol'] in selected else selected[0] if len(selected) == 1 else None
+    if symbol is None:
+        raise ValueError('The theory selects multiple currencies but not this workspace currency.')
+    params = {k: theory[k] for k in ('lookback_minutes', 'threshold_pct', 'position_fraction',
+                                    'stop_loss_pct', 'take_profit_pct')}
+    warning = None
+    try:
+        validate_theory(theory, {'symbol': symbol, 'expected_theory': {}})
+    except TheoryInvalid as exc:
+        warning = str(exc)
+    return dict(id=theory['id'], version=theory['version'], strategy=theory['strategy'],
+                symbol=symbol, params=params, validation_error=warning)
+
+
 def save_setup(member, symbol, version, label, provider, model, pin, new_keys, strategy=None, params=None):
     from tools.configure import write_configs
     if not member.strip() or not label.strip() or not model.strip():

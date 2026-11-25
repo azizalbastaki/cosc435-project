@@ -30,8 +30,28 @@ class ScreenTests(unittest.TestCase):
                 self.assertTrue(all(x.proto.type == TextInput.PASSWORD for x in app.text_input
                                     if x.label in ['Ledger trader key','Ledger Guardian key','Model provider key']))
         app.text_input[0].set_value('')
-        app.button[0].click().run()
+        next(button for button in app.button if button.label == 'Save workspace').click().run()
         self.assertTrue(any('Enter your name' in x.value for x in app.error))
         self.assertFalse(app.exception)
+
+    def test_fetch_populates_form_without_saving_or_starting(self):
+        fetched = dict(id=49, version=7, strategy='momentum', symbol='ETH',
+                       params=dict(lookback_minutes=10, threshold_pct=0.5, position_fraction=0.05,
+                                   stop_loss_pct=2, take_profit_pct=3),
+                       validation_error='take_profit_pct outside the validated safe range')
+        with patch('gui.backend.fetch_theory_settings', return_value=fetched) as fetch, \
+                patch('gui.backend.save_setup') as save, patch('gui.backend.SessionController.start') as start:
+            app = AppTest.from_file(str(ROOT/'app.py')).run(timeout=30)
+            app.sidebar.radio[0].set_value('Setup').run()
+            app.button(key='fetch_theory').click().run()
+            self.assertFalse(app.exception, str(app.exception))
+            fetch.assert_called_once()
+            self.assertEqual(app.selectbox(key='setup_strategy').value, 'momentum')
+            self.assertEqual(app.selectbox(key='setup_symbol').value, 'ETH')
+            self.assertEqual(app.number_input(key='setup_version').value, 7)
+            self.assertIn('"take_profit_pct": 3', app.text_area(key='setup_params').value)
+            self.assertTrue(any('local trading validation still rejects' in x.value for x in app.warning))
+            save.assert_not_called()
+            start.assert_not_called()
 
 if __name__=='__main__': unittest.main()

@@ -16,8 +16,10 @@ REQUIRED = ("id", "version", "status", "strategy", "selected_symbols", "lookback
             "threshold_pct", "position_fraction", "stop_loss_pct", "take_profit_pct")
 
 
-def validate_theory(theory: dict, cfg: dict) -> dict:
-    """Structural and semantic checks on the theory returned by /theory.php."""
+def validate_structure(theory: dict) -> dict:
+    """Validate the Ledger contract without applying local trading eligibility."""
+    if not isinstance(theory, dict):
+        raise TheoryInvalid("expected a theory object")
     if not theory:
         raise TheoryInvalid("no active theory: the agent holds until one is submitted")
     missing = [k for k in REQUIRED if theory.get(k) in (None, "")]
@@ -51,6 +53,12 @@ def validate_theory(theory: dict, cfg: dict) -> dict:
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi \
                 or round(v, 4) != v:
             raise TheoryInvalid(f"{k}={v!r} outside the documented range [{lo}, {hi}] or >4 decimals")
+    return theory
+
+
+def validate_theory(theory: dict, cfg: dict) -> dict:
+    """Validate the contract, local safety limits, and expected theory pins."""
+    validate_structure(theory)
     exp = cfg["expected_theory"]
     if exp.get("version") and int(theory["version"]) != int(exp["version"]):
         raise TheoryInvalid(f"theory version {theory['version']} differs from validated version {exp['version']};"

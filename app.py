@@ -284,6 +284,24 @@ def setup_page():
         return
     a,z=st.columns([2,1],gap='large')
     with a:
+        if st.button('Fetch theory from Ledger', key='fetch_theory'):
+            try:
+                with st.spinner('Reading your submitted theory…'):
+                    fetched = b.fetch_theory_settings()
+                st.session_state.update(setup_strategy=fetched['strategy'], setup_symbol=fetched['symbol'],
+                                        setup_version=fetched['version'], setup_pin=True,
+                                        setup_params=json.dumps(fetched['params'], indent=2),
+                                        fetched_theory=fetched)
+            except Exception:
+                st.error('Could not fetch a supported submitted theory. Check your saved trader key, '
+                         'Ledger connection, and submitted theory. Existing fields were not changed.')
+        st.caption('Uses your saved trader key. Fetching only fills this form; Save workspace applies the settings locally.')
+        fetched = st.session_state.get('fetched_theory')
+        if fetched:
+            st.caption(f"Fetched theory #{fetched['id']} · version {fetched['version']}. Review before saving.")
+            if fetched.get('validation_error'):
+                st.warning('Fetched successfully, but local trading validation still rejects it: '
+                           + fetched['validation_error'] + '. Fetching does not override safety limits.')
         selected_strategy = st.selectbox('Trading strategy', list(strategy_labels)[:2],
                                         index=0 if (observed_strategy or configured_strategy) == 'momentum' else 1,
                                         format_func=lambda value: strategy_labels[value], key='setup_strategy')
@@ -292,12 +310,13 @@ def setup_page():
             section('Account & strategy','Match these settings to the theory submitted on Ledger.')
             name=st.text_input('Team member',value=cfg.get('member',''))
             c1,c2=st.columns(2)
-            symbol=c1.selectbox('Assigned currency',list(COIN_THEORY),index=list(COIN_THEORY).index(cfg['symbol']))
-            version=c2.number_input('Submitted theory version',min_value=1,value=int(cfg['expected_theory']['version']),step=1)
+            symbol=c1.selectbox('Assigned currency',list(COIN_THEORY),index=list(COIN_THEORY).index(cfg['symbol']),key='setup_symbol')
+            version=c2.number_input('Submitted theory version',min_value=1,value=int(cfg['expected_theory']['version']),step=1,key='setup_version')
             label=st.text_input('Trader key label',value=gcfg.get('expected_trader_key_labels',[''])[0])
-            pin=st.checkbox('Pin my validated theory parameters',value=bool(cfg['expected_theory'].get('params')))
+            pin=st.checkbox('Pin my validated theory parameters',value=bool(cfg['expected_theory'].get('params')),key='setup_pin')
             params_text=st.text_area('Validated theory parameters (JSON)',
                                     value=json.dumps(cfg['expected_theory'].get('params', {}), indent=2),
+                                    key='setup_params',
                                     help='Enter your replay-validated lookback_minutes, threshold_pct, position_fraction, stop_loss_pct, and take_profit_pct. Mean-reversion presets are not momentum presets.')
             st.divider()
             section('Language model','Both agents use this provider. Model calls may incur charges.')

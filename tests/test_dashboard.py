@@ -15,6 +15,27 @@ import run_session
 
 
 class DashboardTests(unittest.TestCase):
+    def test_fetch_theory_is_read_only_and_reports_local_limit_conflicts(self):
+        theory = dict(id=49, version=1, status='SUBMITTED', strategy='momentum', selected_symbols=['ETH'],
+                      lookback_minutes=10, threshold_pct=0.5, position_fraction=0.05,
+                      stop_loss_pct=2, take_profit_pct=3, hypothesis='Do not copy this prose')
+        with patch.object(backend, 'config', return_value={'symbol': 'ETH', 'base_url': 'https://example.test'}), \
+                patch.object(backend, 'credentials', return_value={'LEDGER_TRADER_KEY': 'test-trader'}), \
+                patch('common.ledger_client.LedgerClient') as client:
+            client.return_value.theory.return_value = theory
+            result = backend.fetch_theory_settings()
+            client.return_value.theory.assert_called_once_with()
+            self.assertEqual(result['strategy'], 'momentum')
+            self.assertEqual(result['params']['take_profit_pct'], 3)
+            self.assertIn('take_profit_pct', result['validation_error'])
+            self.assertNotIn('hypothesis', result)
+            client.return_value.post.assert_not_called()
+            client.return_value.propose.assert_not_called()
+            client.return_value.review.assert_not_called()
+            client.return_value.theory.return_value = dict(theory, status='DRAFT')
+            with self.assertRaises(ValueError):
+                backend.fetch_theory_settings()
+
     def test_setup_preserves_momentum_and_custom_pins(self):
         params = {'lookback_minutes': 10, 'threshold_pct': 0.5, 'position_fraction': 0.05,
                   'stop_loss_pct': 2, 'take_profit_pct': 5}

@@ -40,6 +40,12 @@ credentials preserves those settings instead of reverting to mean reversion.
 The sidebar labels cached Ledger observations as such and warns when the local
 strategy pin differs. Refresh from Ledger to update that observation. These UI
 corrections were made with Codex assistance; they do not relax validation limits.
+In Setup, **Fetch theory from Ledger** reads your submitted theory with the saved
+trader key and fills the currency, strategy, version, and five numeric parameters.
+Review the populated form and press **Save workspace**. Fetching makes no model
+calls or trades, changes no files, and does not modify the theory on Ledger.
+Local eligibility conflicts are shown explicitly; imported settings do not bypass
+the trading validator. This read-only import was implemented with Codex assistance.
 
 The CLI configuration tool accepts `--strategy momentum --no-pin`; this generates
 role-separated config skeletons without borrowing the mean-reversion numeric
